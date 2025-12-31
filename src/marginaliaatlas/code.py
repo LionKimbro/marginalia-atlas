@@ -124,7 +124,7 @@ def corner_for_handle(item_id):
     return None
 
 
-def item_id_for_canvas_item(item_id):
+def item_id_for_canvas_item(canvas_item_id):
     for item_id, data in G_CANVAS.items():
         if canvas_item_id in (
             data.get("rect"),
