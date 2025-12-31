@@ -1,14 +1,14 @@
 {
-  "main": {
+  "cli.py.main": {
     "bbox": [
       63.0,
       167.0,
-      136.0,
-      402.0
+      135.0,
+      486.0
     ],
     "color": "#88ccff"
   },
-  "run_scan_command": {
+  "scan_command.py.run_scan_command": {
     "bbox": [
       163.0,
       27.0,
@@ -17,7 +17,7 @@
     ],
     "color": "#88ccff"
   },
-  "iter_source_files": {
+  "discovery.py.iter_source_files": {
     "bbox": [
       244.0,
       25.0,
@@ -26,7 +26,7 @@
     ],
     "color": "#88ccff"
   },
-  "decide_destinations": {
+  "output_routing.py.decide_destinations": {
     "bbox": [
       248.0,
       281.0,
@@ -35,16 +35,16 @@
     ],
     "color": "#88ccff"
   },
-  "run_indexes_command": {
+  "indexes_command.py.run_indexes_command": {
     "bbox": [
       162.0,
       354.0,
-      228.0,
-      529.0
+      223.0,
+      530.0
     ],
     "color": "#88ccff"
   },
-  "build_indexes": {
+  "indexes.py.build_indexes": {
     "bbox": [
       267.0,
       407.0,
@@ -53,25 +53,25 @@
     ],
     "color": "#88ccff"
   },
-  "write_json": {
+  "io_utils.py.write_json": {
     "bbox": [
-      267.0,
-      556.0,
-      327.0,
-      616.0
+      150.0,
+      582.0,
+      210.0,
+      642.0
     ],
     "color": "#88ccff"
   },
-  "db": {
+  "state.py.db": {
     "bbox": [
       61.0,
-      684.0,
-      337.0,
-      753.0
+      714.0,
+      329.0,
+      770.0
     ],
     "color": "#88ccff"
   },
-  "scan_file": {
+  "scan.py.scan_file": {
     "bbox": [
       248.0,
       97.0,
@@ -80,7 +80,7 @@
     ],
     "color": "#88ccff"
   },
-  "parse_meta_line": {
+  "meta_parse.py.parse_meta_line": {
     "bbox": [
       343.0,
       101.0,
@@ -89,21 +89,93 @@
     ],
     "color": "#88ccff"
   },
-  "make_item": {
+  "meta_parse.py.find_bindable": {
     "bbox": [
-      344.0,
-      227.0,
-      403.0,
-      252.0
+      341.0,
+      180.0,
+      417.0,
+      205.0
     ],
     "color": "#88ccff"
   },
-  "find_bindable": {
+  "#g_args": {
     "bbox": [
-      373.0,
-      168.0,
-      449.0,
-      193.0
+      11.0,
+      64.0,
+      32.0,
+      85.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_base_path": {
+    "bbox": [
+      65.0,
+      63.0,
+      86.0,
+      86.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_command": {
+    "bbox": [
+      133.0,
+      141.0,
+      153.0,
+      160.0
+    ],
+    "color": "#88ccff"
+  },
+  "file_nav.py.read_line": {
+    "bbox": [
+      528.0,
+      132.0,
+      568.0,
+      163.0
+    ],
+    "color": "#88ccff"
+  },
+  "file_nav.py.start_reading": {
+    "bbox": [
+      529.0,
+      64.0,
+      568.0,
+      95.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_line": {
+    "bbox": [
+      611.0,
+      100.0,
+      634.0,
+      121.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_line_num": {
+    "bbox": [
+      611.0,
+      154.0,
+      634.0,
+      179.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_file": {
+    "bbox": [
+      626.0,
+      41.0,
+      652.0,
+      64.0
+    ],
+    "color": "#88ccff"
+  },
+  "#g_path": {
+    "bbox": [
+      590.0,
+      42.0,
+      616.0,
+      65.0
     ],
     "color": "#88ccff"
   },
@@ -119,10 +191,10 @@
         1
       ],
       [
-        692,
+        890,
         1
       ]
     ]
   },
-  "_window": "1549x879+2110+53"
+  "_window": "1549x879+2177+71"
 }
