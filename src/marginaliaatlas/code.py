@@ -9,13 +9,13 @@ from tkinter.scrolledtext import ScrolledText
 # GLOBAL STATE (INTENTIONAL)
 # ============================================================
 
-G_INV = {}          # symbol -> inventory record
-G_ATTACH = {}       # symbol -> attachment metadata
-G_CANVAS = {}       # symbol -> canvas objects
-G_SELECTED = None   # currently selected symbol
+G_INV = {}          # id -> inventory record
+G_ATTACH = {}       # id -> attachment metadata
+G_CANVAS = {}       # id -> canvas objects
+G_SELECTED = None   # currently selected id
 
 G_DRAG = {
-    "symbol": None,
+    "item_id": None,
     "x": 0,
     "y": 0,
     "handle": None,
@@ -23,7 +23,7 @@ G_DRAG = {
 }
 
 G_HOVER = {
-    "item": None,
+    "canvas_item_id": None,
 }
 
 HANDLE_SIZE = 6
@@ -40,7 +40,7 @@ G_PANES = {
 # ============================================================
 
 def is_dragging():
-    return G_DRAG["symbol"] is not None
+    return G_DRAG["item_id"] is not None
 
 
 def move_items(items, dx, dy):
@@ -67,13 +67,13 @@ def resize_rect(rect, dx, dy, corner):
     canvas.coords(rect, x0, y0, x1, y1)
 
 
-def apply_drag(sym, dx, dy):
-    data = G_CANVAS[sym]
+def apply_drag(item_id, dx, dy):
+    data = G_CANVAS[item_id]
     rect = data["rect"]
 
     if G_DRAG["handle"]:
         resize_rect(rect, dx, dy, G_DRAG["corner"])
-        update_handles(sym)
+        update_handles(item_id)
     else:
         move_items(
             [rect, data["label"], *data.get("handles", [])],
@@ -82,13 +82,13 @@ def apply_drag(sym, dx, dy):
         )
 
 
-def sync_attachment_geometry(sym):
-    data = G_CANVAS[sym]
+def sync_attachment_geometry(item_id):
+    data = G_CANVAS[item_id]
     rect = data["rect"]
     label = data["label"]
 
     x0, y0, x1, y1 = canvas.coords(rect)
-    G_ATTACH[sym]["bbox"] = (x0, y0, x1, y1)
+    G_ATTACH[item_id]["bbox"] = (x0, y0, x1, y1)
 
     canvas.coords(label, (x0 + x1) // 2, y1 + 10)
 
@@ -103,7 +103,7 @@ def load_inventory(path="inventory.json"):
     with open(path, "r", encoding="utf-8") as f:
         items = json.load(f)
 
-    G_INV = {item["symbol"]: item for item in items}
+    G_INV = {item["id"]: item for item in items}
 
 
 # ============================================================
@@ -124,31 +124,31 @@ def corner_for_handle(item_id):
     return None
 
 
-def symbol_for_canvas_item(item_id):
-    for sym, data in G_CANVAS.items():
-        if item_id in (
+def item_id_for_canvas_item(item_id):
+    for item_id, data in G_CANVAS.items():
+        if canvas_item_id in (
             data.get("rect"),
             data.get("label"),
             *data.get("handles", []),
         ):
-            return sym
+            return item_id
 
     return None
 
 
-def cursor_for_item(item_id):
-    if not item_id:
+def cursor_for_item(canvas_item_id):
+    if not canvas_item_id:
         return ""
 
-    return "sizing" if is_handle(item_id) else "fleur"
+    return "sizing" if is_handle(canvas_item_id) else "fleur"
 
 
 # ============================================================
 # HANDLE MANAGEMENT
 # ============================================================
 
-def create_handles(sym):
-    data = G_CANVAS[sym]
+def create_handles(item_id):
+    data = G_CANVAS[item_id]
     rect = data["rect"]
 
     x0, y0, x1, y1 = canvas.coords(rect)
@@ -172,8 +172,8 @@ def create_handles(sym):
     data["handles"] = handles
 
 
-def remove_handles(sym):
-    data = G_CANVAS.get(sym)
+def remove_handles(item_id):
+    data = G_CANVAS.get(item_id)
     if not data:
         return
 
@@ -183,8 +183,8 @@ def remove_handles(sym):
     data["handles"] = []
 
 
-def update_handles(sym):
-    data = G_CANVAS.get(sym)
+def update_handles(item_id):
+    data = G_CANVAS.get(item_id)
     if not data:
         return
 
@@ -202,22 +202,22 @@ def update_handles(sym):
 def sync_handles():
     """
     Enforce invariant:
-    Handles exist iff sym == G_SELECTED.
+    Handles exist iff item_id == G_SELECTED.
     """
-    for sym, data in G_CANVAS.items():
-        if sym == G_SELECTED:
+    for item_id, data in G_CANVAS.items():
+        if item_id == G_SELECTED:
             if not data.get("handles"):
-                create_handles(sym)
+                create_handles(item_id)
         else:
             if data.get("handles"):
-                remove_handles(sym)
+                remove_handles(item_id)
 
 
 # ============================================================
 # ATTACHMENT LIFECYCLE
 # ============================================================
 
-def attach_new_square(sym, x, y):
+def attach_new_square(item_id, x, y):
     size = 60
     x0, y0 = x - size // 2, y - size // 2
     x1, y1 = x + size // 2, y + size // 2
@@ -234,17 +234,17 @@ def attach_new_square(sym, x, y):
     label = canvas.create_text(
         (x0 + x1) // 2,
         y1 + 10,
-        text=sym,
+        text=G_INV[item_id]["symbol"],
         fill="white",
         anchor="n",
     )
 
-    G_ATTACH[sym] = {
+    G_ATTACH[item_id] = {
         "bbox": (x0, y0, x1, y1),
         "color": "#88ccff",
     }
 
-    G_CANVAS[sym] = {
+    G_CANVAS[item_id] = {
         "rect": rect,
         "label": label,
         "handles": [],
@@ -253,20 +253,20 @@ def attach_new_square(sym, x, y):
     sync_handles()
 
 
-def delete_attachment(sym):
-    if sym not in G_CANVAS:
+def delete_attachment(item_id):
+    if item_id not in G_CANVAS:
         return
 
-    data = G_CANVAS.pop(sym)
-    G_ATTACH.pop(sym, None)
+    data = G_CANVAS.pop(item_id)
+    G_ATTACH.pop(item_id, None)
 
     for item in (data["rect"], data["label"], *data.get("handles", [])):
         canvas.delete(item)
 
-    if G_SELECTED == sym:
+    if G_SELECTED == item_id:
         set_selected(None)
 
-    if G_DRAG["symbol"] == sym:
+    if G_DRAG["item_id"] == item_id:
         set_drag(None)
 
 
@@ -274,21 +274,21 @@ def delete_attachment(sym):
 # DRAG SYNC
 # ============================================================
 
-def set_drag(symbol=None, *, x=None, y=None, handle=None, corner=None):
+def set_drag(item_id=None, *, x=None, y=None, handle=None, corner=None):
     """
     The ONLY place drag state is allowed to change.
-    Passing symbol=None cancels the drag.
+    Passing item_id=None cancels the drag.
     """
-    if symbol is None:
-        G_DRAG.update(symbol=None, handle=None, corner=None)
+    if item_id is None:
+        G_DRAG.update(item_id=None, handle=None, corner=None)
         return
 
-    # Lock selection to dragged symbol
-    if G_SELECTED != symbol:
-        set_selected(symbol)
+    # Lock selection to dragged item_id
+    if G_SELECTED != item_id:
+        set_selected(item_id)
 
     G_DRAG.update(
-        symbol=symbol,
+        item_id=item_id,
         x=x,
         y=y,
         handle=handle,
@@ -300,16 +300,16 @@ def set_drag(symbol=None, *, x=None, y=None, handle=None, corner=None):
 # SELECTION SYNC
 # ============================================================
 
-def set_selected(sym):
+def set_selected(item_id):
     """
     The ONLY place selection is allowed to change.
     """
     global G_SELECTED
 
-    if sym == G_SELECTED:
+    if item_id == G_SELECTED:
         return
 
-    G_SELECTED = sym
+    G_SELECTED = item_id
 
     sync_handles()
     sync_canvas_selection()
@@ -363,61 +363,61 @@ def on_canvas_hover(event):
     items = canvas.find_withtag("current")
     item = items[0] if items else None
 
-    if item == G_HOVER["item"]:
+    if item == G_HOVER["canvas_item_id"]:
         return
 
-    G_HOVER["item"] = item
+    G_HOVER["canvas_item_id"] = item
     canvas.config(cursor=cursor_for_item(item))
 
 
 def on_canvas_leave(event):
-    G_HOVER["item"] = None
+    G_HOVER["canvas_item_id"] = None
     canvas.config(cursor="")
 
 
 def on_canvas_button_press(event):
-    items = canvas.find_withtag("current")
+    canvas_items = canvas.find_withtag("current")
 
-    if not items:
+    if not canvas_items:
         if G_SELECTED and G_SELECTED not in G_CANVAS:
             attach_new_square(G_SELECTED, event.x, event.y)
         return
 
-    item = items[0]
-    sym = symbol_for_canvas_item(item)
-    if not sym:
+    canvas_item = canvas_items[0]
+    item_id = item_id_for_canvas_item(canvas_item)
+    if not item_id:
         return
 
     set_drag(
-        sym,
+        item_id,
         x=event.x,
         y=event.y,
-        handle=item if is_handle(item) else None,
-        corner=corner_for_handle(item) if is_handle(item) else None,
+        handle=canvas_item if is_handle(canvas_item) else None,
+        corner=corner_for_handle(canvas_item) if is_handle(canvas_item) else None,
     )
-
-    set_selected(sym)
+    
+    set_selected(item_id)
 
 
 def on_canvas_motion(event):
-    sym = G_DRAG["symbol"]
+    item_id = G_DRAG["item_id"]
 
-    if not sym or sym not in G_CANVAS:
+    if not item_id or item_id not in G_CANVAS:
         set_drag(None)
         return
 
     dx = event.x - G_DRAG["x"]
     dy = event.y - G_DRAG["y"]
 
-    apply_drag(sym, dx, dy)
-    sync_attachment_geometry(sym)
+    apply_drag(item_id, dx, dy)
+    sync_attachment_geometry(item_id)
 
     G_DRAG["x"], G_DRAG["y"] = event.x, event.y
 
 
 def on_canvas_button_release(event):
     set_drag(None)
-    G_HOVER["item"] = None
+    G_HOVER["canvas_item_id"] = None
     canvas.config(cursor="")
 
 
@@ -438,8 +438,8 @@ def set_window_geometry(geom):
 def save_attachments(path="attachments.json"):
     data = {}
 
-    for sym, meta in G_ATTACH.items():
-        data[sym] = {
+    for item_id, meta in G_ATTACH.items():
+        data[item_id] = {
             "bbox": list(meta["bbox"]),
             "color": meta.get("color", "#88ccff"),
         }
@@ -460,15 +460,15 @@ def load_attachments(path="attachments.json"):
         data = json.load(f)
 
     # Clear existing attachments
-    for sym in list(G_CANVAS.keys()):
-        delete_attachment(sym)
+    for item_id in list(G_CANVAS.keys()):
+        delete_attachment(item_id)
 
     layout = data.pop("_layout", None)
     window_geom = data.pop("_window", None)
 
     # Rebuild from file
-    for sym, meta in data.items():
-        if sym not in G_INV:
+    for item_id, meta in data.items():
+        if item_id not in G_INV:
             continue  # inventory changed — skip safely
 
         x0, y0, x1, y1 = meta["bbox"]
@@ -483,17 +483,17 @@ def load_attachments(path="attachments.json"):
         label = canvas.create_text(
             (x0 + x1) // 2,
             y1 + 10,
-            text=sym,
+            text=G_INV[item_id]["symbol"],
             fill="white",
             anchor="n",
         )
 
-        G_ATTACH[sym] = {
+        G_ATTACH[item_id] = {
             "bbox": (x0, y0, x1, y1),
             "color": color,
         }
 
-        G_CANVAS[sym] = {
+        G_CANVAS[item_id] = {
             "rect": rect,
             "label": label,
             "handles": [],
@@ -700,8 +700,8 @@ def main():
     load_inventory()
 
     tree.delete(*tree.get_children())
-    for sym in sorted(G_INV):
-        tree.insert("", "end", iid=sym, text=sym)
+    for item_id in sorted(G_INV):
+        tree.insert("", "end", iid=item_id, text=G_INV[item_id]["symbol"])
 
     load_attachments()
     root.update_idletasks()
