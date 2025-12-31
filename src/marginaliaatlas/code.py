@@ -625,87 +625,88 @@ def render_inventory_item(text_widget, item):
         for k, v in custom.items():
             insert_kv(text_widget, f"{k}:", v, label_tag="custom")
 
+def main():
+    global root, panes, tree, canvas, text
 
+    root = tk.Tk()
+    root.title("Inventory Attachments")
 
-root = tk.Tk()
-root.title("Inventory Attachments")
+    root.bind("<Delete>", on_delete_key)
+    root.bind("<BackSpace>", on_delete_key)
 
-root.bind("<Delete>", on_delete_key)
-root.bind("<BackSpace>", on_delete_key)
+    root.bind("<Control-s>", lambda e: save_attachments())
+    root.bind("<Control-o>", lambda e: load_attachments())
 
-root.bind("<Control-s>", lambda e: save_attachments())
-root.bind("<Control-o>", lambda e: load_attachments())
+    root.bind("<Control-1>", lambda e: toggle_pane(tree))
+    root.bind("<Control-2>", lambda e: toggle_pane(canvas))
+    root.bind("<Control-3>", lambda e: toggle_pane(text))
+    root.bind("<Control-space>", lambda e: focus_canvas())
 
-root.bind("<Control-1>", lambda e: toggle_pane(tree))
-root.bind("<Control-2>", lambda e: toggle_pane(canvas))
-root.bind("<Control-3>", lambda e: toggle_pane(text))
-root.bind("<Control-space>", lambda e: focus_canvas())
+    panes = tk.PanedWindow(
+        root,
+        orient=tk.HORIZONTAL,
+        sashrelief=tk.RAISED,
+        sashwidth=6,
+        bg="#333333",
+    )
+    panes.pack(fill=tk.BOTH, expand=True)
 
+    tree = ttk.Treeview(root, show="tree")
+    canvas = tk.Canvas(root, bg="#1e1e1e")
+    text = ScrolledText(root, wrap="none")
 
+    text.configure(
+        bg="#0b1220",
+        fg="#e6e6e6",
+        insertbackground="#ffffff",
+        selectbackground="#264f78",
+        font=("TkFixedFont", 11),
+        padx=12,
+        pady=12,
+    )
 
-panes = tk.PanedWindow(
-    root,
-    orient=tk.HORIZONTAL,
-    sashrelief=tk.RAISED,
-    sashwidth=6,
-    bg="#333333",
-)
-panes.pack(fill=tk.BOTH, expand=True)
+    # --- TAG STYLES ---
+    text.tag_configure("title", foreground="#ffffff", font=("Consolas", 13, "bold"))
+    text.tag_configure("subtitle", foreground="#a8d8ff")
+    text.tag_configure("comment", foreground="#7ec699")
+    text.tag_configure("label", foreground="#ffcc66")
+    text.tag_configure("value", foreground="#dddddd")
+    text.tag_configure("custom", foreground="#c792ea")
 
-tree = ttk.Treeview(root, show="tree")
-canvas = tk.Canvas(root, bg="#1e1e1e")
-text = ScrolledText(root, wrap="none")
+    tree._pane_name = "tree"
+    canvas._pane_name = "canvas"
+    text._pane_name = "text"
 
-text.configure(
-    bg="#0b1220",        # deep navy
-    fg="#e6e6e6",        # default text
-    insertbackground="#ffffff",  # cursor
-    selectbackground="#264f78",
-    font=("TkFixedFont", 11),
-    padx=12,
-    pady=12,
-)
+    panes.add(tree, minsize=150)
+    panes.add(canvas, minsize=300)
+    panes.add(text, minsize=200)
 
-# --- TAG STYLES ---
-text.tag_configure("title", foreground="#ffffff", font=("Consolas", 13, "bold"))
-text.tag_configure("subtitle", foreground="#a8d8ff")
-text.tag_configure("comment", foreground="#7ec699")
-text.tag_configure("label", foreground="#ffcc66")
-text.tag_configure("value", foreground="#dddddd")
-text.tag_configure("custom", foreground="#c792ea")
+    root.update_idletasks()
+    panes.sash_place(0, 200, 0)
+    panes.sash_place(1, 900, 0)
 
-tree._pane_name = "tree"
-canvas._pane_name = "canvas"
-text._pane_name = "text"
+    tree.bind("<<TreeviewSelect>>", on_tree_select)
 
-panes.add(tree, minsize=150)    # left: inventory
-panes.add(canvas, minsize=300)  # middle: canvas
-panes.add(text, minsize=200)    # right: JSON
+    canvas.bind("<ButtonPress-1>", on_canvas_button_press)
+    canvas.bind("<B1-Motion>", on_canvas_motion)
+    canvas.bind("<Motion>", on_canvas_hover)
+    canvas.bind("<ButtonRelease-1>", on_canvas_button_release)
+    canvas.bind("<Leave>", on_canvas_leave)
 
-root.update_idletasks()
-panes.sash_place(0, 200, 0)  # between tree and canvas
-panes.sash_place(1, 900, 0)  # between canvas and text
+    # -----------------
+    # BOOT
+    # -----------------
 
-tree.bind("<<TreeviewSelect>>", on_tree_select)
+    load_inventory()
 
-canvas.bind("<ButtonPress-1>", on_canvas_button_press)
-canvas.bind("<B1-Motion>", on_canvas_motion)
-canvas.bind("<Motion>", on_canvas_hover)
-canvas.bind("<ButtonRelease-1>", on_canvas_button_release)
-canvas.bind("<Leave>", on_canvas_leave)
+    tree.delete(*tree.get_children())
+    for sym in sorted(G_INV):
+        tree.insert("", "end", iid=sym, text=sym)
 
+    load_attachments()
+    root.update_idletasks()
 
-# ============================================================
-# BOOT
-# ============================================================
+    root.mainloop()
 
-load_inventory()
-
-tree.delete(*tree.get_children())
-for sym in sorted(G_INV):
-    tree.insert("", "end", iid=sym, text=sym)
-
-load_attachments()
-root.update_idletasks()
-
-root.mainloop()
+if __name__ == "__main__":
+    main()
