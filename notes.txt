@@ -1,0 +1,53 @@
+date: 2025-12-28
+title: Status Note
+
+* I need to somehow "install" marginalia-attach with a pyproject.toml or something like
+* I need to record somewhere the process of using marginalia-attach,
+  and eventually the automation of its use.
+* I'd like to have each note have a unique and persisting ID#;
+  Requires extending marginalia;
+  The plan is something like:
+
+    # meta: #49kd modules=foo,bar,baz callers=1
+
+  That way, if the object should move somewhere else, it will still track, effortlessly.
+
+  Development for doing so can be found at:
+
+--------------------------------------------------------------------------------
+    https://chatgpt.com/c/6950ccf4-c068-8325-b77e-8cdc0680bae9
+--------------------------------------------------------------------------------
+
+  Basic code:
+
+--------------------------------------------------------------------------------
+for part in parts:
+    if part.startswith("@"):
+        ...
+        anchor = am.group(1)
+        continue
+
+    if part.startswith("#"):
+        id_token = part[1:]
+        if not id_token:
+            raise MetaParseError("empty id token")
+        item_id = id_token
+        continue
+--------------------------------------------------------------------------------
+
+  or perhaps better:
+
+--------------------------------------------------------------------------------
+    if part.startswith("#"):
+        if not part[1:]:
+            raise MetaParseError("empty id token")
+        item_id = part
+        continue
+--------------------------------------------------------------------------------
+
+
+  Remaining to be coded:
+
+* constructing a default ID, at the appropriate place
+* extending marginalia/specs/comment-spec.json to know the #id system
+* extending marginalia/specs/output-spec.json to assign how it outputs

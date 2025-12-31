@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marginalia-atlas"
+version = "0.1.0"
+description = "A spatial atlas for navigating Marginalia code inventories."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Lion Kimbro" }
+]
+
+dependencies = [
+  # add runtime deps here, e.g.
+  # "tk",
+]
+
+[project.urls]
+Homepage = "https://github.com/LionKimbro/marginalia-atlas"
+Repository = "https://github.com/LionKimbro/marginalia-atlas"
+
+[project.scripts]
+marginalia-atlas = "marginaliaatlas.code:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

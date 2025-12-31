@@ -1,0 +1,128 @@
+{
+  "main": {
+    "bbox": [
+      63.0,
+      167.0,
+      136.0,
+      402.0
+    ],
+    "color": "#88ccff"
+  },
+  "run_scan_command": {
+    "bbox": [
+      163.0,
+      27.0,
+      226.0,
+      324.0
+    ],
+    "color": "#88ccff"
+  },
+  "iter_source_files": {
+    "bbox": [
+      244.0,
+      25.0,
+      319.0,
+      63.0
+    ],
+    "color": "#88ccff"
+  },
+  "decide_destinations": {
+    "bbox": [
+      248.0,
+      281.0,
+      322.0,
+      306.0
+    ],
+    "color": "#88ccff"
+  },
+  "run_indexes_command": {
+    "bbox": [
+      162.0,
+      354.0,
+      228.0,
+      529.0
+    ],
+    "color": "#88ccff"
+  },
+  "build_indexes": {
+    "bbox": [
+      267.0,
+      407.0,
+      327.0,
+      467.0
+    ],
+    "color": "#88ccff"
+  },
+  "write_json": {
+    "bbox": [
+      267.0,
+      556.0,
+      327.0,
+      616.0
+    ],
+    "color": "#88ccff"
+  },
+  "db": {
+    "bbox": [
+      61.0,
+      684.0,
+      337.0,
+      753.0
+    ],
+    "color": "#88ccff"
+  },
+  "scan_file": {
+    "bbox": [
+      248.0,
+      97.0,
+      321.0,
+      250.0
+    ],
+    "color": "#88ccff"
+  },
+  "parse_meta_line": {
+    "bbox": [
+      343.0,
+      101.0,
+      402.0,
+      136.0
+    ],
+    "color": "#88ccff"
+  },
+  "make_item": {
+    "bbox": [
+      344.0,
+      227.0,
+      403.0,
+      252.0
+    ],
+    "color": "#88ccff"
+  },
+  "find_bindable": {
+    "bbox": [
+      373.0,
+      168.0,
+      449.0,
+      193.0
+    ],
+    "color": "#88ccff"
+  },
+  "_layout": {
+    "visible": {
+      "tree": true,
+      "canvas": true,
+      "text": true
+    },
+    "sashes": [
+      [
+        200,
+        1
+      ],
+      [
+        692,
+        1
+      ]
+    ]
+  },
+  "_window": "1549x879+2110+53"
+}
