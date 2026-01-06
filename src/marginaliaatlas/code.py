@@ -14,6 +14,7 @@ G_INV = {}          # id -> inventory record
 G_ATTACH = {}       # id -> attachment metadata
 G_CANVAS = {}       # id -> canvas objects
 G_SELECTED = None   # currently selected id
+G_MODULE_HIGHLIGHT = None  # module name or None
 
 G_DRAG = {
     "item_id": None,
@@ -37,7 +38,7 @@ G_PANES = {
 
 
 # ============================================================
-# INDEX HELPERS
+# MODULE HELPERS
 # ============================================================
 
 def build_module_index():
@@ -53,6 +54,22 @@ def build_module_index():
             index[m].append(item_id)
 
     return dict(index)
+
+def items_in_module(module):
+    result = []
+    for item_id, item in G_INV.items():
+        if module in (item.get("modules") or []):
+            result.append(item_id)
+    return result
+
+def set_module_highlight(module):
+    global G_MODULE_HIGHLIGHT
+
+    if module == G_MODULE_HIGHLIGHT:
+        return
+    
+    G_MODULE_HIGHLIGHT = module
+    sync_module_highlight()
 
 
 # ============================================================
@@ -324,8 +341,10 @@ def set_selected(item_id):
     """
     The ONLY place selection is allowed to change.
     """
-    global G_SELECTED
+    global G_SELECTED, G_MODULE_HIGHLIGHT
 
+    G_MODULE_HIGHLIGHT = None
+    
     if item_id == G_SELECTED:
         return
 
@@ -333,6 +352,7 @@ def set_selected(item_id):
 
     sync_handles()
     sync_canvas_selection()
+    sync_module_highlight()
     sync_tree_selection()
     sync_json_view()
 
@@ -363,6 +383,34 @@ def sync_json_view():
     render_inventory_item(text, G_INV[G_SELECTED])
 
 
+# ============================================================
+# MODULE SELECTION
+# ============================================================
+
+def sync_module_highlight():
+    # First: reset all rectangles to normal
+    for item_id, data in G_CANVAS.items():
+        rect = data["rect"]
+
+        item = G_INV.get(item_id, {})
+        modules = item.get("modules") or []
+
+        if G_MODULE_HIGHLIGHT and G_MODULE_HIGHLIGHT in modules:
+            width=3
+            outline="red"
+        else:
+            width=1
+            outline="white"
+            
+        canvas.itemconfigure(data["rect"], outline=outline, width=width)
+    
+    if G_SELECTED in G_CANVAS:
+        canvas.itemconfigure(
+            G_CANVAS[G_SELECTED]["rect"],
+            outline="yellow",
+            width=3,
+        )
+
 
 # ============================================================
 # EVENT HANDLERS
@@ -376,7 +424,10 @@ def on_tree_select(event):
     iid = sel[0]
     
     if iid.startswith("module::"):
-        return  # ignore folder selection
+        module = iid.split("::", 1)[1]
+        set_selected(None)
+        set_module_highlight(module)
+        return
 
     if iid.startswith("leaf::"):
         _, _, item_id = iid.split("::", 2)
