@@ -3,6 +3,7 @@ import json
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
+from collections import defaultdict
 
 
 # ============================================================
@@ -33,6 +34,25 @@ G_PANES = {
     "canvas": True,
     "text": True,
 }
+
+
+# ============================================================
+# INDEX HELPERS
+# ============================================================
+
+def build_module_index():
+    """
+    Returns:
+      dict: module_name -> [item_id, ...]
+    """
+    index = defaultdict(list)
+
+    for item_id, item in G_INV.items():
+        modules = item.get("modules") or []
+        for m in modules:
+            index[m].append(item_id)
+
+    return dict(index)
 
 
 # ============================================================
@@ -350,8 +370,17 @@ def sync_json_view():
 
 def on_tree_select(event):
     sel = tree.selection()
-    if sel:
-        set_selected(sel[0])
+    if not sel:
+        return
+
+    iid = sel[0]
+    
+    if iid.startswith("module::"):
+        return  # ignore folder selection
+
+    if iid.startswith("leaf::"):
+        _, _, item_id = iid.split("::", 2)
+        set_selected(item_id)
 
 
 def on_delete_key(event=None):
@@ -625,6 +654,53 @@ def render_inventory_item(text_widget, item):
         for k, v in custom.items():
             insert_kv(text_widget, f"{k}:", v, label_tag="custom")
 
+def populate_tree_grouped_by_module():
+    tree.delete(*tree.get_children())
+
+    module_index = build_module_index()
+
+    # Optional: collect unmodule'd items
+    ungrouped = []
+
+    for item_id, item in G_INV.items():
+        if not item.get("modules"):
+            ungrouped.append(item_id)
+
+    # Create module folders
+    for module in sorted(module_index):
+        module_iid = f"module::{module}"
+
+        tree.insert(
+            "",
+            "end",
+            iid=module_iid,
+            text=module,
+            open=True,
+        )
+
+        for item_id in sorted(module_index[module]):
+            leaf_iid = f"leaf::{module}::{item_id}"
+            
+            tree.insert(
+                module_iid,
+                "end",
+                iid=leaf_iid,
+                text=G_INV[item_id]["symbol"],
+                values=(item_id,)
+            )
+
+    # Optional: Ungrouped bucket
+    if ungrouped:
+        tree.insert("", "end", iid="module::<none>", text="(no module)", open=True)
+        for item_id in sorted(ungrouped):
+            tree.insert(
+                "module::<none>",
+                "end",
+                iid=item_id,
+                text=G_INV[item_id]["symbol"],
+            )
+
+
 def main():
     global root, panes, tree, canvas, text
 
@@ -699,10 +775,8 @@ def main():
 
     load_inventory()
 
-    tree.delete(*tree.get_children())
-    for item_id in sorted(G_INV):
-        tree.insert("", "end", iid=item_id, text=G_INV[item_id]["symbol"])
-
+    populate_tree_grouped_by_module()
+    
     load_attachments()
     root.update_idletasks()
 
