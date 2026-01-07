@@ -12,7 +12,7 @@ from collections import defaultdict
 
 G_INV = {}          # id -> inventory record
 G_ATTACH = {}       # id -> attachment metadata
-G_CANVAS = {}       # id -> canvas objects
+G_CANVAS = {}       # id -> canvas objects  {"rect": #, "label": #, "handles": [#,#,#,#]}
 
 G_DRAG = {
     "item_id": None,
@@ -255,6 +255,7 @@ def is_handle(item_id):
 
 
 def corner_for_handle(item_id):
+    canvas = W("c")
     tags = canvas.gettags(item_id)
 
     for t in ("nw", "ne", "se", "sw"):
@@ -310,28 +311,47 @@ def create_handles(item_id):
         )
         handles.append(h)
 
-    data["handles"] = handles
+    item_canvas_data["handles"] = handles
 
 
-def remove_handles(item_id):
+def update_handles():
     canvas = W("c")
-    data = G_CANVAS.get(item_id)
-    if not data:
+    item_canvas_data = CUR["item_canvas_data"]
+
+    handles = item_canvas_data.get("handles", [])
+    if not handles:
         return
 
-    for h in data.get("handles", []):
+    rect = item_canvas_data["rect"]
+    x0, y0, x1, y1 = canvas.coords(rect)
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    for h, (x, y) in zip(handles, corners):
+        canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
+
+
+def remove_handles():
+    canvas = W("c")
+    item_id = CUR["item_id"]
+    item_canvas_data = G_CANVAS.get(item_id)
+    if not item_canvas_data:
+        return
+
+    for h in item_canvas_data.get("handles", []):
         canvas.delete(h)
 
-    data["handles"] = []
+    item_canvas_data["handles"] = []
 
 
 def set_handles(should_have_fn):
     if should_have_fn():
         if not has_handles():
-            create_handles(CUR["item_id"])
+            create_handles()
+        else:
+            update_handles()
     else:
         if has_handles():
-            remove_handles(CUR["item_id"])
+            remove_handles()
 
 def should_have_handles():
     return CUR["item_id"] == g["selected"]
@@ -341,28 +361,12 @@ def rule_handles():
 
 
 
-def update_handles(item_id):
-    canvas = W("c")
-    data = G_CANVAS.get(item_id)
-    if not data:
-        return
-
-    handles = data.get("handles", [])
-    if not handles:
-        return
-
-    x0, y0, x1, y1 = canvas.coords(data["rect"])
-    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-
-    for h, (x, y) in zip(handles, corners):
-        canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
-
-
 # ============================================================
 # ATTACHMENT LIFECYCLE
 # ============================================================
 
 def attach_new_square(item_id, x, y):
+    canvas = W("c")
     size = 60
     x0, y0 = x - size // 2, y - size // 2
     x1, y1 = x + size // 2, y + size // 2
@@ -600,6 +604,7 @@ def on_canvas_button_release(event):
 # ============================================================
 
 def get_window_geometry():
+    root = W("r")
     # Ensure geometry is up-to-date
     root.update_idletasks()
     return root.geometry()
@@ -627,7 +632,7 @@ def save_attachments(path="attachments.json"):
     print(f"[saved] {path}")
 
 def load_attachments(path="attachments.json"):
-    canvas = widgets["canvas"]
+    canvas = W("c")
     if not os.path.exists(path):
         return
 
