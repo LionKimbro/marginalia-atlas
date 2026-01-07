@@ -13,8 +13,6 @@ from collections import defaultdict
 G_INV = {}          # id -> inventory record
 G_ATTACH = {}       # id -> attachment metadata
 G_CANVAS = {}       # id -> canvas objects
-G_SELECTED = None   # currently selected id
-G_MODULE_HIGHLIGHT = None  # module name or None
 
 G_DRAG = {
     "item_id": None,
@@ -35,6 +33,109 @@ G_PANES = {
     "canvas": True,
     "text": True,
 }
+
+g = {
+    "selected": None,  # currently selected id
+    "module_highlight": None  # module name or None
+}
+
+widgets = {
+    "root": None,
+    "panes": None,
+    "tree": None,
+    "canvas": None,
+    "text": None
+}
+
+
+# ============================================================
+# Register (CUR) Support
+# ============================================================
+
+CUR = {
+    "item_id": None,  # register: currently iterated item
+    "item_canvas_data": None,  # register: currently iterated item's canvas data
+    "item_inv": None,  # register: currently iterated item's inventory record
+    "item_modules": None  # register: current iterated item's modules
+}
+
+def iterate_item(item_id):
+    CUR["item_id"] = item_id
+    CUR["item_canvas_data"] = G_CANVAS.get(item_id)
+    inv = G_INV.get(item_id)
+    CUR["item_inv"] = inv
+    CUR["item_modules"] = inv.get("modules", []) if inv else []
+
+def has_handles():
+    D = CUR["item_canvas_data"]
+    return bool(D and D.get("handles"))
+
+def foreach_item(fn):
+    for item_id in G_CANVAS:
+        iterate_item(item_id)
+        fn()
+
+
+# ============================================================
+# Rules Support
+# ============================================================
+
+RULES = []
+
+def initialize_rules_at_program_start():
+    RULES.extend([
+        rule_default_appearance,
+        rule_module_highlight,
+        rule_selected_highlight,
+        rule_handles
+    ])
+
+def apply_rules():
+    for rule in RULES:
+        rule()
+
+def sync_all():
+    foreach_item(apply_rules)
+
+
+# ============================================================
+# Widget Retrieval
+# ============================================================
+
+_WIDGET_ORDER = ("tree", "canvas", "text", "panes", "root")
+
+_WIDGET_CODES = {
+    "t": "tree",
+    "c": "canvas",
+    "x": "text",   # x = teXt
+    "p": "panes",
+    "r": "root",
+}
+
+def W(codes=None):
+    w = widgets  # local alias
+
+    # --- Case 1: return all ---
+    if not codes:
+        return tuple(w[name] for name in _WIDGET_ORDER)
+
+    # --- Case 2 & 3: decode string ---
+    if not isinstance(codes, str):
+        raise TypeError("W() expects a string of widget codes, e.g. 'cp' or 'x'")
+
+    result = []
+    for ch in codes:
+        name = _WIDGET_CODES.get(ch)
+        if not name:
+            raise KeyError(f"Unknown widget code: {ch!r}")
+        result.append(w[name])
+
+    # --- Case 2: single ---
+    if len(result) == 1:
+        return result[0]
+
+    # --- Case 3: multiple ---
+    return tuple(result)
 
 
 # ============================================================
@@ -63,13 +164,11 @@ def items_in_module(module):
     return result
 
 def set_module_highlight(module):
-    global G_MODULE_HIGHLIGHT
-
-    if module == G_MODULE_HIGHLIGHT:
+    if module == g["module_highlight"]:
         return
-    
-    G_MODULE_HIGHLIGHT = module
-    sync_module_highlight()
+
+    g["module_highlight"] = module
+    sync_all()
 
 
 # ============================================================
@@ -81,11 +180,13 @@ def is_dragging():
 
 
 def move_items(items, dx, dy):
+    canvas = W("c")
     for item in items:
         canvas.move(item, dx, dy)
 
 
 def resize_rect(rect, dx, dy, corner):
+    canvas = W("c")
     x0, y0, x1, y1 = canvas.coords(rect)
 
     if corner == "nw":
@@ -120,6 +221,8 @@ def apply_drag(item_id, dx, dy):
 
 
 def sync_attachment_geometry(item_id):
+    canvas = W("c")
+    
     data = G_CANVAS[item_id]
     rect = data["rect"]
     label = data["label"]
@@ -148,7 +251,7 @@ def load_inventory(path="inventory.json"):
 # ============================================================
 
 def is_handle(item_id):
-    return "handle" in canvas.gettags(item_id)
+    return "handle" in widgets["canvas"].gettags(item_id)
 
 
 def corner_for_handle(item_id):
@@ -185,6 +288,7 @@ def cursor_for_item(canvas_item_id):
 # ============================================================
 
 def create_handles(item_id):
+    canvas = W("c")
     data = G_CANVAS[item_id]
     rect = data["rect"]
 
@@ -210,6 +314,7 @@ def create_handles(item_id):
 
 
 def remove_handles(item_id):
+    canvas = W("c")
     data = G_CANVAS.get(item_id)
     if not data:
         return
@@ -220,7 +325,24 @@ def remove_handles(item_id):
     data["handles"] = []
 
 
+def set_handles(should_have_fn):
+    if should_have_fn():
+        if not has_handles():
+            create_handles(CUR["item_id"])
+    else:
+        if has_handles():
+            remove_handles(CUR["item_id"])
+
+def should_have_handles():
+    return CUR["item_id"] == g["selected"]
+
+def rule_handles():
+    set_handles(should_have_handles)
+
+
+
 def update_handles(item_id):
+    canvas = W("c")
     data = G_CANVAS.get(item_id)
     if not data:
         return
@@ -234,20 +356,6 @@ def update_handles(item_id):
 
     for h, (x, y) in zip(handles, corners):
         canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
-
-
-def sync_handles():
-    """
-    Enforce invariant:
-    Handles exist iff item_id == G_SELECTED.
-    """
-    for item_id, data in G_CANVAS.items():
-        if item_id == G_SELECTED:
-            if not data.get("handles"):
-                create_handles(item_id)
-        else:
-            if data.get("handles"):
-                remove_handles(item_id)
 
 
 # ============================================================
@@ -287,7 +395,7 @@ def attach_new_square(item_id, x, y):
         "handles": [],
     }
 
-    sync_handles()
+    sync_all()
 
 
 def delete_attachment(item_id):
@@ -300,7 +408,7 @@ def delete_attachment(item_id):
     for item in (data["rect"], data["label"], *data.get("handles", [])):
         canvas.delete(item)
 
-    if G_SELECTED == item_id:
+    if g["selected"] == item_id:
         set_selected(None)
 
     if G_DRAG["item_id"] == item_id:
@@ -321,7 +429,7 @@ def set_drag(item_id=None, *, x=None, y=None, handle=None, corner=None):
         return
 
     # Lock selection to dragged item_id
-    if G_SELECTED != item_id:
+    if g["selected"] != item_id:
         set_selected(item_id)
 
     G_DRAG.update(
@@ -341,75 +449,57 @@ def set_selected(item_id):
     """
     The ONLY place selection is allowed to change.
     """
-    global G_SELECTED, G_MODULE_HIGHLIGHT
+    canvas, tree, text = W("ctx")
 
-    G_MODULE_HIGHLIGHT = None
-    
-    if item_id == G_SELECTED:
+    if item_id == g["selected"]:
         return
 
-    G_SELECTED = item_id
+    g["selected"] = item_id
+    g["module_highlight"] = None
 
-    sync_handles()
-    sync_canvas_selection()
-    sync_module_highlight()
+    sync_all()
     sync_tree_selection()
     sync_json_view()
 
+def rule_default_appearance():
+    widgets["canvas"].itemconfigure(CUR["item_canvas_data"]["rect"], outline="white", width=1)
 
-def sync_canvas_selection():
-    for data in G_CANVAS.values():
-        canvas.itemconfigure(data["rect"], outline="white", width=1)
-
-    if G_SELECTED in G_CANVAS:
-        canvas.itemconfigure(
-            G_CANVAS[G_SELECTED]["rect"],
-            outline="yellow",
-            width=3,
-        )
-
+def rule_selected_highlight():
+    if CUR["item_id"] == g["selected"]:
+        rect = CUR["item_canvas_data"]["rect"]
+        widgets["canvas"].itemconfigure(rect, outline="yellow", width=3)
 
 def sync_tree_selection():
-    if G_SELECTED and tree.exists(G_SELECTED):
-        tree.selection_set(G_SELECTED)
-        tree.see(G_SELECTED)
+    tree = W("t")
+    sel = g["selected"]
 
+    if sel and tree.exists(sel):
+        tree.selection_set(sel)
+        tree.see(sel)
 
 def sync_json_view():
-    if not G_SELECTED:
+    text = W("x")
+    sel = g["selected"]
+
+    if not sel:
         text.delete("1.0", "end")
         return
 
-    render_inventory_item(text, G_INV[G_SELECTED])
+    render_inventory_item(text, G_INV[sel])
 
 
 # ============================================================
-# MODULE SELECTION
+# MODULE/ITEM SELECTION
 # ============================================================
 
-def sync_module_highlight():
-    # First: reset all rectangles to normal
-    for item_id, data in G_CANVAS.items():
-        rect = data["rect"]
+def rule_module_highlight():
+    rect = CUR["item_canvas_data"]["rect"]
+    highlight = g["module_highlight"]
 
-        item = G_INV.get(item_id, {})
-        modules = item.get("modules") or []
-
-        if G_MODULE_HIGHLIGHT and G_MODULE_HIGHLIGHT in modules:
-            width=3
-            outline="red"
-        else:
-            width=1
-            outline="white"
-            
-        canvas.itemconfigure(data["rect"], outline=outline, width=width)
-    
-    if G_SELECTED in G_CANVAS:
-        canvas.itemconfigure(
-            G_CANVAS[G_SELECTED]["rect"],
-            outline="yellow",
-            width=3,
-        )
+    if highlight and highlight in CUR["item_modules"]:
+        width = 3
+        outline = "red"
+        widgets["canvas"].itemconfigure(rect, outline=outline, width=width)
 
 
 # ============================================================
@@ -417,6 +507,7 @@ def sync_module_highlight():
 # ============================================================
 
 def on_tree_select(event):
+    tree = W("t")
     sel = tree.selection()
     if not sel:
         return
@@ -435,11 +526,13 @@ def on_tree_select(event):
 
 
 def on_delete_key(event=None):
-    if G_SELECTED in G_CANVAS:
-        delete_attachment(G_SELECTED)
+    selected = g["selected"]
+    if selected in G_CANVAS:
+        delete_attachment(selected)
 
 
 def on_canvas_hover(event):
+    canvas = W("c")
     items = canvas.find_withtag("current")
     item = items[0] if items else None
 
@@ -452,15 +545,16 @@ def on_canvas_hover(event):
 
 def on_canvas_leave(event):
     G_HOVER["canvas_item_id"] = None
-    canvas.config(cursor="")
+    widgets["canvas"].config(cursor="")
 
 
 def on_canvas_button_press(event):
-    canvas_items = canvas.find_withtag("current")
+    selected = g["selected"]
+    canvas_items = widgets["canvas"].find_withtag("current")
 
     if not canvas_items:
-        if G_SELECTED and G_SELECTED not in G_CANVAS:
-            attach_new_square(G_SELECTED, event.x, event.y)
+        if selected and selected not in G_CANVAS:
+            attach_new_square(selected, event.x, event.y)
         return
 
     canvas_item = canvas_items[0]
@@ -498,7 +592,7 @@ def on_canvas_motion(event):
 def on_canvas_button_release(event):
     set_drag(None)
     G_HOVER["canvas_item_id"] = None
-    canvas.config(cursor="")
+    widgets["canvas"].config(cursor="")
 
 
 # ============================================================
@@ -512,7 +606,7 @@ def get_window_geometry():
 
 def set_window_geometry(geom):
     if geom:
-        root.geometry(geom)
+        widgets["root"].geometry(geom)
 
 
 def save_attachments(path="attachments.json"):
@@ -533,6 +627,7 @@ def save_attachments(path="attachments.json"):
     print(f"[saved] {path}")
 
 def load_attachments(path="attachments.json"):
+    canvas = widgets["canvas"]
     if not os.path.exists(path):
         return
 
@@ -579,8 +674,7 @@ def load_attachments(path="attachments.json"):
             "handles": [],
         }
 
-    sync_handles()
-    sync_canvas_selection()
+    sync_all()
 
     if layout:
         set_pane_layout(layout)
@@ -621,6 +715,7 @@ def get_pane_layout():
     return layout
 
 def set_pane_layout(layout):
+    tree, canvas, text, panes, root = W()
     # Restore visibility
     for widget in (tree, canvas, text):
         name = widget._pane_name
@@ -706,6 +801,7 @@ def render_inventory_item(text_widget, item):
             insert_kv(text_widget, f"{k}:", v, label_tag="custom")
 
 def populate_tree_grouped_by_module():
+    tree = W("t")
     tree.delete(*tree.get_children())
 
     module_index = build_module_index()
@@ -753,9 +849,7 @@ def populate_tree_grouped_by_module():
 
 
 def main():
-    global root, panes, tree, canvas, text
-
-    root = tk.Tk()
+    widgets["root"] = root = tk.Tk()
     root.title("Inventory Attachments")
 
     root.bind("<Delete>", on_delete_key)
@@ -769,7 +863,7 @@ def main():
     root.bind("<Control-3>", lambda e: toggle_pane(text))
     root.bind("<Control-space>", lambda e: focus_canvas())
 
-    panes = tk.PanedWindow(
+    widgets["panes"] = panes = tk.PanedWindow(
         root,
         orient=tk.HORIZONTAL,
         sashrelief=tk.RAISED,
@@ -778,9 +872,9 @@ def main():
     )
     panes.pack(fill=tk.BOTH, expand=True)
 
-    tree = ttk.Treeview(root, show="tree")
-    canvas = tk.Canvas(root, bg="#1e1e1e")
-    text = ScrolledText(root, wrap="none")
+    widgets["tree"] = tree = ttk.Treeview(root, show="tree")
+    widgets["canvas"] = canvas = tk.Canvas(root, bg="#1e1e1e")
+    widgets["text"] = text = ScrolledText(root, wrap="none")
 
     text.configure(
         bg="#0b1220",
@@ -823,7 +917,8 @@ def main():
     # -----------------
     # BOOT
     # -----------------
-
+    
+    initialize_rules_at_program_start()
     load_inventory()
 
     populate_tree_grouped_by_module()
