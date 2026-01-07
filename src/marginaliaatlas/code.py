@@ -12,7 +12,6 @@ from collections import defaultdict
 
 G_INV = {}          # id -> inventory record
 G_ATTACH = {}       # id -> attachment metadata
-G_CANVAS = {}       # id -> canvas objects  {"rect": #, "label": #, "handles": [#,#,#,#]}
 
 G_DRAG = {
     "item_id": None,
@@ -46,6 +45,50 @@ widgets = {
     "canvas": None,
     "text": None
 }
+
+# ============================================================
+# Render State (Projected, Screen-Space)
+# ============================================================
+#
+# G_CANVAS maps item_id -> render description for that item.
+#
+# This structure is NOT the source of truth for world geometry.
+# World geometry lives in:
+#     G_ATTACH[item_id]["bbox"]   # (x0, y0, x1, y1) in world coords
+#
+# G_CANVAS holds only *projected, screen-space render intent*
+# plus the canvas object IDs needed to realize that intent.
+#
+# Rules write ONLY to these fields.
+# A later flush pass will read these fields and update Tk canvas.
+#
+# Typical entry:
+#
+#   G_CANVAS[item_id] = {
+#       # ---- Canvas object identities (Tk implementation detail) ----
+#       # These are created once and reused; rules should not depend
+#       # on their geometry or styling, only their existence.
+#
+#       "rect": <canvas_id>,            # rectangle item on Tk canvas
+#       "label": <canvas_id>,           # text item on Tk canvas
+#       "handles": [h0, h1, h2, h3],     # corner handle rectangles
+#
+#       # ---- Render intent (projected, screen-space) ----
+#       # These fields are written by RULES and describe what the
+#       # canvas *should* look like for this item this frame.
+#       # In Phase 3, only the renderer will read these and apply them.
+#
+#       "rect_coords": (x0, y0, x1, y1), # projected rectangle geometry
+#       "rect_outline": "white",         # outline color
+#       "rect_width": 1,                 # outline width (pixels)
+#       "rect_fill": "#88ccff",          # fill color
+#
+#       "label_coord": (x, y),           # projected label position
+#       "label_text": "A",               # text content
+#       "label_color": "white",          # text color
+#   }
+#
+G_CANVAS = {}
 
 
 # ============================================================
@@ -249,57 +292,39 @@ def cursor_for_item(canvas_item_id):
 
 def create_handles():
     canvas = W("c")
-    item_canvas_data = CUR["item_canvas_data"]
-    rect = item_canvas_data["rect"]
-
-    x0, y0, x1, y1 = canvas.coords(rect)
+    D = CUR["item_canvas_data"]
+    x0, y0, x1, y1 = D["rect_coords"]
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
     tags = ["nw", "ne", "se", "sw"]
 
     handles = []
-
     for (x, y), tag in zip(corners, tags):
         h = canvas.create_rectangle(
-            x - 5,
-            y - 5,
-            x + 5,
-            y + 5,
+            x-5, y-5, x+5, y+5,
             fill="#ffcc00",
             outline="#000000",
             tags=("handle", tag),
         )
         handles.append(h)
 
-    item_canvas_data["handles"] = handles
+    D["handles"] = handles
 
 
 def update_handles():
     canvas = W("c")
-    item_canvas_data = CUR["item_canvas_data"]
-
-    handles = item_canvas_data.get("handles", [])
-    if not handles:
-        return
-
-    rect = item_canvas_data["rect"]
-    x0, y0, x1, y1 = canvas.coords(rect)
+    D = CUR["item_canvas_data"]
+    x0, y0, x1, y1 = D["rect_coords"]
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-
-    for h, (x, y) in zip(handles, corners):
-        canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
+    for h, (x, y) in zip(D["handles"], corners):
+        canvas.coords(h, x-5, y-5, x+5, y+5)
 
 
 def remove_handles():
     canvas = W("c")
-    item_id = CUR["item_id"]
-    item_canvas_data = G_CANVAS.get(item_id)
-    if not item_canvas_data:
-        return
-
-    for h in item_canvas_data.get("handles", []):
+    item_canvas_data = CUR["item_canvas_data"]
+    for h in item_canvas_data["handles"]:
         canvas.delete(h)
-
-    item_canvas_data["handles"] = []
+    del item_canvas_data["handles"][:]
 
 
 def set_handles(should_have_fn):
@@ -327,35 +352,39 @@ def rule_handles():
 def attach_new_square(item_id, x, y):
     canvas = W("c")
     size = 60
+
+    # ---- world geometry (source of truth) ----
     x0, y0 = x - size // 2, y - size // 2
     x1, y1 = x + size // 2, y + size // 2
-
-    rect = canvas.create_rectangle(
-        x0,
-        y0,
-        x1,
-        y1,
-        fill="#88ccff",
-        outline="white",
-    )
-
-    label = canvas.create_text(
-        (x0 + x1) // 2,
-        y1 + 10,
-        text=G_INV[item_id]["symbol"],
-        fill="white",
-        anchor="n",
-    )
 
     G_ATTACH[item_id] = {
         "bbox": (x0, y0, x1, y1),
         "color": "#88ccff",
     }
 
+    # ---- projected render intent (Phase 2 cache) ----
+    cx = (x0 + x1) / 2
+    cy = y1 + 10
+
+    # ---- create canvas objects (temporary until Phase 3) ----
+    rect = canvas.create_rectangle(x0, y0, x1, y1)
+    label = canvas.create_text(cx, cy, anchor="n")
+
     G_CANVAS[item_id] = {
+        # canvas identities
         "rect": rect,
         "label": label,
         "handles": [],
+
+        # render intent (screen space)
+        "rect_coords": (x0, y0, x1, y1),
+        "rect_outline": "white",
+        "rect_width": 1,
+        "rect_fill": "#88ccff",
+
+        "label_coord": (cx, cy),
+        "label_text": G_INV[item_id]["symbol"],
+        "label_color": "white",
     }
 
     sync_all()
@@ -434,6 +463,9 @@ def rule_default_appearance():
     label_id = D["label"]
 
     # project rect
+    D["rect_coords"] = (x0,y0,x1,y1)
+    D["rect_outline"] = "white"
+    D["rect_width"] = 1
     canvas.coords(rect_id, x0, y0, x1, y1)
     canvas.itemconfigure(rect_id, outline="white", width=1)
 
@@ -441,11 +473,54 @@ def rule_default_appearance():
     if label_id is not None:
         cx = (x0 + x1) / 2
         cy = y1 + 10
+        D["label_coord"] = (cx,cy)
+        D["label_color"] = "white"
         canvas.coords(label_id, cx, cy)
+
+def rule_default_appearance():
+    canvas = W("c")
+
+    attach = CUR["item_attachment_data"]
+    x0, y0, x1, y1 = attach["bbox"]
+
+    D = CUR["item_canvas_data"]
+    rect_id = D["rect"]
+    label_id = D["label"]
+
+    # ---- render intent ----
+    D["rect_coords"] = (x0, y0, x1, y1)
+    D["rect_outline"] = "white"
+    D["rect_width"] = 1
+    D["rect_fill"] = "#88ccff"
+
+    cx = (x0 + x1) / 2
+    cy = y1 + 10
+    D["label_coord"] = (cx, cy)
+    D["label_text"] = G_INV[CUR["item_id"]]["symbol"]
+    D["label_color"] = "white"
+
+    # ---- temporary Phase-2 bridge: apply to canvas ----
+    canvas.coords(rect_id, x0, y0, x1, y1)
+    canvas.itemconfigure(
+        rect_id,
+        outline=D["rect_outline"],
+        width=D["rect_width"],
+        fill=D["rect_fill"],
+    )
+
+    canvas.coords(label_id, cx, cy)
+    canvas.itemconfigure(
+        label_id,
+        text=D["label_text"],
+        fill=D["label_color"],
+    )
 
 def rule_selected_highlight():
     if CUR["item_id"] == g["selected"]:
-        rect = CUR["item_canvas_data"]["rect"]
+        D = CUR["item_canvas_data"]
+        rect = D["rect"]
+        D["rect_outline"] = "yellow"
+        D["rect_width"] = 3
         widgets["canvas"].itemconfigure(rect, outline="yellow", width=3)
 
 def sync_tree_selection():
@@ -472,13 +547,14 @@ def sync_json_view():
 # ============================================================
 
 def rule_module_highlight():
-    rect = CUR["item_canvas_data"]["rect"]
+    D = CUR["item_canvas_data"]
+    rect = D["rect"]
     highlight = g["module_highlight"]
 
     if highlight and highlight in CUR["item_modules"]:
-        width = 3
-        outline = "red"
-        widgets["canvas"].itemconfigure(rect, outline=outline, width=width)
+        D["rect_width"] = 3
+        D["rect_outline"] = "red"
+        widgets["canvas"].itemconfigure(rect, outline=D["rect_outline"], width=D["rect_width"])
 
 
 # ============================================================
@@ -606,6 +682,7 @@ def save_attachments(path="attachments.json"):
 
     print(f"[saved] {path}")
 
+
 def load_attachments(path="attachments.json"):
     canvas = W("c")
     if not os.path.exists(path):
@@ -621,7 +698,7 @@ def load_attachments(path="attachments.json"):
     layout = data.pop("_layout", None)
     window_geom = data.pop("_window", None)
 
-    # Rebuild from file
+    # Rebuild from file (model first, render intent second)
     for item_id, meta in data.items():
         if item_id not in G_INV:
             continue  # inventory changed — skip safely
@@ -629,29 +706,35 @@ def load_attachments(path="attachments.json"):
         x0, y0, x1, y1 = meta["bbox"]
         color = meta.get("color", "#88ccff")
 
-        rect = canvas.create_rectangle(
-            x0, y0, x1, y1,
-            fill=color,
-            outline="white",
-        )
-
-        label = canvas.create_text(
-            (x0 + x1) // 2,
-            y1 + 10,
-            text=G_INV[item_id]["symbol"],
-            fill="white",
-            anchor="n",
-        )
-
+        # ---- model (world truth) ----
         G_ATTACH[item_id] = {
             "bbox": (x0, y0, x1, y1),
             "color": color,
         }
 
+        # ---- projected render intent ----
+        cx = (x0 + x1) / 2
+        cy = y1 + 10
+
+        # ---- canvas identities (temporary until Phase 3) ----
+        rect = canvas.create_rectangle(x0, y0, x1, y1)
+        label = canvas.create_text(cx, cy, anchor="n")
+
         G_CANVAS[item_id] = {
+            # canvas IDs
             "rect": rect,
             "label": label,
             "handles": [],
+
+            # render intent
+            "rect_coords": (x0, y0, x1, y1),
+            "rect_outline": "white",
+            "rect_width": 1,
+            "rect_fill": color,
+
+            "label_coord": (cx, cy),
+            "label_text": G_INV[item_id]["symbol"],
+            "label_color": "white",
         }
 
     sync_all()
