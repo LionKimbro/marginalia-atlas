@@ -60,32 +60,46 @@ widgets = {
 # plus the canvas object IDs needed to realize that intent.
 #
 # Rules write ONLY to these fields.
-# A later flush pass will read these fields and update Tk canvas.
+# A flush pass (render_all()) reads these fields and updates Tk canvas.
 #
 # Typical entry:
 #
 #   G_CANVAS[item_id] = {
-#       # ---- Canvas object identities (Tk implementation detail) ----
-#       # These are created once and reused; rules should not depend
-#       # on their geometry or styling, only their existence.
+#       # ============================================================
+#       # Canvas object identities (Tk implementation detail)
+#       # ============================================================
+#       # These are managed ONLY by the renderer.
+#       # Rules must never read or write these fields.
 #
-#       "rect": <canvas_id>,            # rectangle item on Tk canvas
-#       "label": <canvas_id>,           # text item on Tk canvas
-#       "handles": [h0, h1, h2, h3],     # corner handle rectangles
+#       "rect": <canvas_id or None>,         # rectangle item on Tk canvas
+#       "label": <canvas_id or None>,        # text item on Tk canvas
+#       "handles": [h0, h1, h2, h3] or [],   # corner handle rectangles
 #
-#       # ---- Render intent (projected, screen-space) ----
-#       # These fields are written by RULES and describe what the
-#       # canvas *should* look like for this item this frame.
-#       # In Phase 3, only the renderer will read these and apply them.
+#       # ============================================================
+#       # Existence intent (declarative)
+#       # ============================================================
+#       # These are written by RULES and describe whether visual
+#       # elements should exist at all for this item this frame.
 #
-#       "rect_coords": (x0, y0, x1, y1), # projected rectangle geometry
-#       "rect_outline": "white",         # outline color
-#       "rect_width": 1,                 # outline width (pixels)
-#       "rect_fill": "#88ccff",          # fill color
+#       "rect_shouldexist": True,            # whether rectangle should be drawn
+#       "label_shouldexist": True,           # whether label should be drawn
+#       "handles_shouldexist": False,        # whether corner handles should exist
 #
-#       "label_coord": (x, y),           # projected label position
-#       "label_text": "A",               # text content
-#       "label_color": "white",          # text color
+#       # ============================================================
+#       # Render intent (projected, screen-space)
+#       # ============================================================
+#       # These are written by RULES and describe what the canvas
+#       # *should* look like for this item this frame.
+#       # In Phase 3, ONLY the renderer reads these and applies them.
+#
+#       "rect_coords": (x0, y0, x1, y1),     # projected rectangle geometry
+#       "rect_outline": "white",             # outline color
+#       "rect_width": 1,                     # outline width (pixels)
+#       "rect_fill": "#88ccff",              # fill color
+#
+#       "label_coord": (x, y),               # projected label position
+#       "label_text": "A",                   # text content
+#       "label_color": "white",              # text color
 #   }
 #
 G_CANVAS = {}
@@ -141,6 +155,7 @@ def apply_rules():
 
 def sync_all():
     foreach_item(apply_rules)
+    render_all()
 
 
 # ============================================================
@@ -181,6 +196,83 @@ def W(codes=None):
 
     # --- Case 3: multiple ---
     return tuple(result)
+
+
+# ============================================================
+# Canvas Rendering
+# ============================================================
+
+def render_all():
+    canvas = W("c")
+
+    for item_id, D in G_CANVAS.items():
+
+        # ============================================================
+        # RECTANGLE
+        # ============================================================
+
+        if D["rect_shouldexist"]:
+            if D["rect"] is None:
+                # create
+                D["rect"] = canvas.create_rectangle(0, 0, 0, 0)
+
+            # apply intent
+            canvas.coords(D["rect"], *D["rect_coords"])
+            canvas.itemconfigure(
+                D["rect"],
+                outline=D["rect_outline"],
+                width=D["rect_width"],
+                fill=D["rect_fill"],
+            )
+        else:
+            if D["rect"] is not None:
+                canvas.delete(D["rect"])
+                D["rect"] = None
+
+        # ============================================================
+        # LABEL
+        # ============================================================
+
+        if D["label_shouldexist"]:
+            if D["label"] is None:
+                D["label"] = canvas.create_text(0, 0, anchor="n")
+
+            canvas.coords(D["label"], *D["label_coord"])
+            canvas.itemconfigure(
+                D["label"],
+                text=D["label_text"],
+                fill=D["label_color"],
+            )
+        else:
+            if D["label"] is not None:
+                canvas.delete(D["label"])
+                D["label"] = None
+
+        # ============================================================
+        # HANDLES
+        # ============================================================
+
+        if D["handles_shouldexist"]:
+            if not D["handles"]:
+                # create 4 handles
+                handles = []
+                for _ in range(4):
+                    h = canvas.create_rectangle(0, 0, 0, 0, fill="#ffcc00", outline="#000000")
+                    handles.append(h)
+                D["handles"] = handles
+
+            # position handles from rect_coords
+            x0, y0, x1, y1 = D["rect_coords"]
+            corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+            for h, (x, y) in zip(D["handles"], corners):
+                canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
+
+        else:
+            if D["handles"]:
+                for h in D["handles"]:
+                    canvas.delete(h)
+                D["handles"] = []
 
 
 # ============================================================
@@ -290,59 +382,8 @@ def cursor_for_item(canvas_item_id):
 # HANDLE MANAGEMENT
 # ============================================================
 
-def create_handles():
-    canvas = W("c")
-    D = CUR["item_canvas_data"]
-    x0, y0, x1, y1 = D["rect_coords"]
-    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    tags = ["nw", "ne", "se", "sw"]
-
-    handles = []
-    for (x, y), tag in zip(corners, tags):
-        h = canvas.create_rectangle(
-            x-5, y-5, x+5, y+5,
-            fill="#ffcc00",
-            outline="#000000",
-            tags=("handle", tag),
-        )
-        handles.append(h)
-
-    D["handles"] = handles
-
-
-def update_handles():
-    canvas = W("c")
-    D = CUR["item_canvas_data"]
-    x0, y0, x1, y1 = D["rect_coords"]
-    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    for h, (x, y) in zip(D["handles"], corners):
-        canvas.coords(h, x-5, y-5, x+5, y+5)
-
-
-def remove_handles():
-    canvas = W("c")
-    item_canvas_data = CUR["item_canvas_data"]
-    for h in item_canvas_data["handles"]:
-        canvas.delete(h)
-    del item_canvas_data["handles"][:]
-
-
-def set_handles(should_have_fn):
-    if should_have_fn():
-        if not has_handles():
-            create_handles()
-        else:
-            update_handles()
-    else:
-        if has_handles():
-            remove_handles()
-
-def should_have_handles():
-    return CUR["item_id"] == g["selected"]
-
 def rule_handles():
-    set_handles(should_have_handles)
-
+    CUR["item_canvas_data"]["handles_shouldexist"] = CUR["item_id"] == g["selected"]
 
 
 # ============================================================
@@ -362,21 +403,21 @@ def attach_new_square(item_id, x, y):
         "color": "#88ccff",
     }
 
-    # ---- projected render intent (Phase 2 cache) ----
+    # ---- projected render intent ----
     cx = (x0 + x1) / 2
     cy = y1 + 10
 
-    # ---- create canvas objects (temporary until Phase 3) ----
-    rect = canvas.create_rectangle(x0, y0, x1, y1)
-    label = canvas.create_text(cx, cy, anchor="n")
-
     G_CANVAS[item_id] = {
         # canvas identities
-        "rect": rect,
-        "label": label,
+        "rect": None,
+        "label": None,
         "handles": [],
 
         # render intent (screen space)
+        "rect_shouldexist": True,
+        "label_shouldexist": True,
+        "handles_shouldexist": False,
+        
         "rect_coords": (x0, y0, x1, y1),
         "rect_outline": "white",
         "rect_width": 1,
@@ -397,9 +438,6 @@ def delete_attachment(item_id):
 
     data = G_CANVAS.pop(item_id)
     G_ATTACH.pop(item_id, None)
-
-    for item in (data["rect"], data["label"], *data.get("handles", [])):
-        canvas.delete(item)
 
     if g["selected"] == item_id:
         set_selected(None)
@@ -453,8 +491,6 @@ def set_selected(item_id):
     sync_json_view()
 
 def rule_default_appearance():
-    canvas = W("c")
-
     attach = CUR["item_attachment_data"]
     x0, y0, x1, y1 = attach["bbox"]
 
@@ -466,8 +502,6 @@ def rule_default_appearance():
     D["rect_coords"] = (x0,y0,x1,y1)
     D["rect_outline"] = "white"
     D["rect_width"] = 1
-    canvas.coords(rect_id, x0, y0, x1, y1)
-    canvas.itemconfigure(rect_id, outline="white", width=1)
 
     # project label (centered under rect)
     if label_id is not None:
@@ -475,11 +509,8 @@ def rule_default_appearance():
         cy = y1 + 10
         D["label_coord"] = (cx,cy)
         D["label_color"] = "white"
-        canvas.coords(label_id, cx, cy)
 
 def rule_default_appearance():
-    canvas = W("c")
-
     attach = CUR["item_attachment_data"]
     x0, y0, x1, y1 = attach["bbox"]
 
@@ -499,21 +530,6 @@ def rule_default_appearance():
     D["label_text"] = G_INV[CUR["item_id"]]["symbol"]
     D["label_color"] = "white"
 
-    # ---- temporary Phase-2 bridge: apply to canvas ----
-    canvas.coords(rect_id, x0, y0, x1, y1)
-    canvas.itemconfigure(
-        rect_id,
-        outline=D["rect_outline"],
-        width=D["rect_width"],
-        fill=D["rect_fill"],
-    )
-
-    canvas.coords(label_id, cx, cy)
-    canvas.itemconfigure(
-        label_id,
-        text=D["label_text"],
-        fill=D["label_color"],
-    )
 
 def rule_selected_highlight():
     if CUR["item_id"] == g["selected"]:
@@ -521,7 +537,6 @@ def rule_selected_highlight():
         rect = D["rect"]
         D["rect_outline"] = "yellow"
         D["rect_width"] = 3
-        widgets["canvas"].itemconfigure(rect, outline="yellow", width=3)
 
 def sync_tree_selection():
     tree = W("t")
@@ -554,7 +569,6 @@ def rule_module_highlight():
     if highlight and highlight in CUR["item_modules"]:
         D["rect_width"] = 3
         D["rect_outline"] = "red"
-        widgets["canvas"].itemconfigure(rect, outline=D["rect_outline"], width=D["rect_width"])
 
 
 # ============================================================
@@ -684,7 +698,6 @@ def save_attachments(path="attachments.json"):
 
 
 def load_attachments(path="attachments.json"):
-    canvas = W("c")
     if not os.path.exists(path):
         return
 
@@ -716,17 +729,17 @@ def load_attachments(path="attachments.json"):
         cx = (x0 + x1) / 2
         cy = y1 + 10
 
-        # ---- canvas identities (temporary until Phase 3) ----
-        rect = canvas.create_rectangle(x0, y0, x1, y1)
-        label = canvas.create_text(cx, cy, anchor="n")
-
         G_CANVAS[item_id] = {
             # canvas IDs
-            "rect": rect,
-            "label": label,
+            "rect": None,
+            "label": None,
             "handles": [],
-
+            
             # render intent
+            "rect_shouldexist": True,
+            "label_shouldexist": True,
+            "handles_shouldexist": False,
+            
             "rect_coords": (x0, y0, x1, y1),
             "rect_outline": "white",
             "rect_width": 1,
