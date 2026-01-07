@@ -362,6 +362,7 @@ def attach_new_square(item_id, x, y):
 
 
 def delete_attachment(item_id):
+    canvas = W("c")
     if item_id not in G_CANVAS:
         return
 
