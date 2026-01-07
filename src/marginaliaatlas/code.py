@@ -54,7 +54,8 @@ widgets = {
 
 CUR = {
     "item_id": None,  # register: currently iterated item
-    "item_canvas_data": None,  # register: currently iterated item's canvas data
+    "item_canvas_data": None,  # register: currently iterated item's G_CANVAS data
+    "item_attachment_data": None,  # register: currently iterated item's G_ATTACH data
     "item_inv": None,  # register: currently iterated item's inventory record
     "item_modules": None  # register: current iterated item's modules
 }
@@ -62,6 +63,7 @@ CUR = {
 def iterate_item(item_id):
     CUR["item_id"] = item_id
     CUR["item_canvas_data"] = G_CANVAS.get(item_id)
+    CUR["item_attachment_data"] = G_ATTACH.get(item_id)
     inv = G_INV.get(item_id)
     CUR["item_inv"] = inv
     CUR["item_modules"] = inv.get("modules", []) if inv else []
@@ -175,62 +177,19 @@ def set_module_highlight(module):
 # DRAG / GEOMETRY HELPERS
 # ============================================================
 
-def is_dragging():
-    return G_DRAG["item_id"] is not None
-
-
-def move_items(items, dx, dy):
-    canvas = W("c")
-    for item in items:
-        canvas.move(item, dx, dy)
-
-
-def resize_rect(rect, dx, dy, corner):
-    canvas = W("c")
-    x0, y0, x1, y1 = canvas.coords(rect)
-
-    if corner == "nw":
-        x0 += dx
-        y0 += dy
-    elif corner == "ne":
-        x1 += dx
-        y0 += dy
-    elif corner == "se":
-        x1 += dx
-        y1 += dy
-    elif corner == "sw":
-        x0 += dx
-        y1 += dy
-
-    canvas.coords(rect, x0, y0, x1, y1)
-
-
 def apply_drag(item_id, dx, dy):
-    data = G_CANVAS[item_id]
-    rect = data["rect"]
+    x0, y0, x1, y1 = G_ATTACH[item_id]["bbox"]
 
     if G_DRAG["handle"]:
-        resize_rect(rect, dx, dy, G_DRAG["corner"])
-        update_handles(item_id)
+        c = G_DRAG["corner"]
+        if c == "nw": x0 += dx; y0 += dy
+        elif c == "ne": x1 += dx; y0 += dy
+        elif c == "se": x1 += dx; y1 += dy
+        elif c == "sw": x0 += dx; y1 += dy
     else:
-        move_items(
-            [rect, data["label"], *data.get("handles", [])],
-            dx,
-            dy,
-        )
+        x0 += dx; y0 += dy; x1 += dx; y1 += dy
 
-
-def sync_attachment_geometry(item_id):
-    canvas = W("c")
-    
-    data = G_CANVAS[item_id]
-    rect = data["rect"]
-    label = data["label"]
-
-    x0, y0, x1, y1 = canvas.coords(rect)
     G_ATTACH[item_id]["bbox"] = (x0, y0, x1, y1)
-
-    canvas.coords(label, (x0 + x1) // 2, y1 + 10)
 
 
 # ============================================================
@@ -288,10 +247,10 @@ def cursor_for_item(canvas_item_id):
 # HANDLE MANAGEMENT
 # ============================================================
 
-def create_handles(item_id):
+def create_handles():
     canvas = W("c")
-    data = G_CANVAS[item_id]
-    rect = data["rect"]
+    item_canvas_data = CUR["item_canvas_data"]
+    rect = item_canvas_data["rect"]
 
     x0, y0, x1, y1 = canvas.coords(rect)
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
@@ -464,7 +423,24 @@ def set_selected(item_id):
     sync_json_view()
 
 def rule_default_appearance():
-    widgets["canvas"].itemconfigure(CUR["item_canvas_data"]["rect"], outline="white", width=1)
+    canvas = W("c")
+
+    attach = CUR["item_attachment_data"]
+    x0, y0, x1, y1 = attach["bbox"]
+
+    D = CUR["item_canvas_data"]
+    rect_id = D["rect"]
+    label_id = D["label"]
+
+    # project rect
+    canvas.coords(rect_id, x0, y0, x1, y1)
+    canvas.itemconfigure(rect_id, outline="white", width=1)
+
+    # project label (centered under rect)
+    if label_id is not None:
+        cx = (x0 + x1) / 2
+        cy = y1 + 10
+        canvas.coords(label_id, cx, cy)
 
 def rule_selected_highlight():
     if CUR["item_id"] == g["selected"]:
@@ -586,7 +562,7 @@ def on_canvas_motion(event):
     dy = event.y - G_DRAG["y"]
 
     apply_drag(item_id, dx, dy)
-    sync_attachment_geometry(item_id)
+    sync_all()
 
     G_DRAG["x"], G_DRAG["y"] = event.x, event.y
 
