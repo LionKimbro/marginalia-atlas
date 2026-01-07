@@ -453,8 +453,6 @@ def set_selected(item_id):
     """
     The ONLY place selection is allowed to change.
     """
-    canvas, tree, text = W("ctx")
-
     if item_id == g["selected"]:
         return
 
@@ -708,6 +706,7 @@ def focus_canvas():
 
 
 def get_pane_layout():
+    panes = W("p")
     layout = {
         "visible": dict(G_PANES),
         "sashes": [],
