@@ -128,6 +128,8 @@ CUR = {
     "item_modules": None,  # register: current iterated item's modules
 
     "event": None,  # register: current event processing
+    "top": None,  # canvas item beneath mouse on canvas, if any, at event processing
+    "top_item_id": None,  # item_id for top, if there is one, otherwise None
     
     "x": 0, "y": 0,  # pt register
     "x0": 0, "y0": 0, "x1": 0, "y1": 0,  # rect register
@@ -135,12 +137,19 @@ CUR = {
 }
 
 def iterate_item(item_id):
-    CUR["item_id"] = item_id
-    CUR["item_canvas_data"] = G_CANVAS.get(item_id)
-    CUR["item_attachment_data"] = G_ATTACH.get(item_id)
-    inv = G_INV.get(item_id)
-    CUR["item_inv"] = inv
-    CUR["item_modules"] = inv.get("modules", []) if inv else []
+    if item_id is None:
+        CUR["item_id"] = None
+        CUR["item_canvas_data"] = None
+        CUR["item_attachment_data"] = None
+        CUR["item_inv"] = None
+        CUR["item_modules"] = []
+    else:
+        CUR["item_id"] = item_id
+        CUR["item_canvas_data"] = G_CANVAS.get(item_id)
+        CUR["item_attachment_data"] = G_ATTACH.get(item_id)
+        inv = G_INV.get(item_id)
+        CUR["item_inv"] = inv
+        CUR["item_modules"] = inv.get("modules", []) if inv else []
 
 def has_handles():
     D = CUR["item_canvas_data"]
@@ -777,29 +786,7 @@ def delete_attachment(item_id):
         set_selected(None)
 
     if G_DRAG["item_id"] == item_id:
-        set_drag(None)
-
-
-# ============================================================
-# DRAG SYNC
-# ============================================================
-
-def cancel_drag():
-    G_DRAG.update(item_id=None, handle=None, corner=None, mode=None)
-
-def set_drag(*, item_id=None, x=None, y=None, handle=None, corner=None, mode=None):
-    """
-    This, and cancel_drag, are the ONLY places drag state is allowed
-    to change.
-    """    
-    G_DRAG.update(
-        item_id=item_id,
-        x=x,
-        y=y,
-        handle=handle,
-        corner=corner,
-        mode=mode
-    )
+        cancel_drag()
 
 
 # ============================================================
@@ -910,8 +897,7 @@ def canvas_top():
     items = widgets["canvas"].find_withtag("current")
     return items[0] if items else None
 
-def on_tree_select(event):
-    CUR["event"] = event
+def on_tree_select():
     tree = W("t")
     sel = tree.selection()
     if not sel:
@@ -930,15 +916,13 @@ def on_tree_select(event):
         set_selected(item_id)
 
 
-def on_delete_key(event=None):
-    CUR["event"] = event
+def on_delete_key():
     selected = g["selected"]
     if selected in G_CANVAS:
         delete_attachment(selected)
 
 
-def on_canvas_hover(event):
-    CUR["event"] = event
+def on_canvas_hover():
     item = canvas_top()
 
     if item == G_HOVER["canvas_item"]:
@@ -948,43 +932,58 @@ def on_canvas_hover(event):
     widgets["canvas"].config(cursor=cursor_for_item(item))
 
 
-def on_canvas_mouse_leaves(event):
-    CUR["event"] = event
+def on_canvas_mouse_leaves():
     G_HOVER["canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
-def on_canvas_button_press(event):
-    CUR["event"] = event
-    
-    top = canvas_top()
+def start_drag(mode):
+    """
+    Capture drag-start context from current UI state.
+    mode: "item" | "pan"
+    """
+    ev = CUR["event"]
 
-    if top:
-        item_id = item_id_for_canvas_item(top)
-        if not item_id:
-            return  # clicked SOMETHING, ... Just not anything relevant.
-        iterate_item(item_id)
-        
-        set_drag(
-            item_id=item_id,
-            x=event.x,
-            y=event.y,
-            handle=top if is_handle(top) else None,
-            corner=corner_for_handle(top) if is_handle(top) else None,
-            mode="item"
-        )
-        
-        set_selected(item_id)
+    G_DRAG.clear()
+    G_DRAG["mode"] = mode
+    G_DRAG["x"] = ev.x if ev else None
+    G_DRAG["y"] = ev.y if ev else None
+
+    if mode == "item":
+        top = canvas_top()
+        item_id = item_id_for_canvas_item(top) if top else None
+
+        G_DRAG["item_id"] = item_id
+        G_DRAG["canvas_item"] = top
+        G_DRAG["handle"] = top if top and is_handle(top) else None
+        G_DRAG["corner"] = corner_for_handle(top) if top and is_handle(top) else None
+
+        if item_id and g["selected"] != item_id:
+            set_selected(item_id)
+
+    elif mode == "pan":
+        G_DRAG["item_id"] = None
+        G_DRAG["canvas_item"] = None
+        G_DRAG["handle"] = None
+        G_DRAG["corner"] = None
+
     else:
-        selected = g["selected"]
-        if selected and selected not in G_CANVAS:
-            attach_new_square(selected, event.x, event.y)
-        set_drag(item_id=None, x=event.x, y=event.y, handle=None, corner=None, mode="pan")
+        raise ValueError(f"start_drag: unknown mode '{mode}'")
+
+def cancel_drag():
+    G_DRAG.clear()
+
+def on_canvas_button_press():
+    top = canvas_top()
+    
+    if top and item_id_for_canvas_item(top):
+        start_drag("item")
+    else:
+        start_drag("pan")
 
 
-def on_canvas_motion(event):
-    CUR["event"] = event
-
+def on_canvas_motion():
+    event = CUR["event"]
     if G_DRAG["mode"] == "pan":
         dx = event.x - G_DRAG["x"]
         dy = event.y - G_DRAG["y"]
@@ -1001,7 +1000,7 @@ def on_canvas_motion(event):
         iterate_item(item_id)
 
         if not item_id or item_id not in G_CANVAS:
-            set_drag(None)
+            cancel_drag()
             return
 
         dx = event.x - G_DRAG["x"]
@@ -1013,15 +1012,15 @@ def on_canvas_motion(event):
         G_DRAG["x"], G_DRAG["y"] = event.x, event.y
 
 
-def on_canvas_button_release(event):
-    CUR["event"] = event
+def on_canvas_button_release():
     cancel_drag()
     G_HOVER["canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
-def on_canvas_configure(event):
+def on_canvas_configure():
     # We have to do this, because Tk is weirdly forgetful.
+    event = CUR["event"]
     g["canvas_view_w"] = event.width
     g["canvas_view_h"] = event.height
     sync_all()
@@ -1288,20 +1287,30 @@ def populate_tree_grouped_by_module():
             )
 
 
+def dispatch_event(event, handler_fn):
+    CUR["event"] = event
+    CUR["top"] = top = canvas_top()
+    CUR["top_item_id"] = item_id_for_canvas_item(top) if top else None
+    handler_fn()
+
+
 def main():
+    def doit(fn):
+        return lambda e: dispatch_event(e, fn)
+    
     widgets["root"] = root = tk.Tk()
     root.title("Inventory Attachments")
 
-    root.bind("<Delete>", on_delete_key)
-    root.bind("<BackSpace>", on_delete_key)
+    root.bind("<Delete>", doit(on_delete_key))
+    root.bind("<BackSpace>", doit(on_delete_key))
 
-    root.bind("<Control-s>", lambda e: save_attachments())
-    root.bind("<Control-o>", lambda e: load_attachments())
+    root.bind("<Control-s>", doit(save_attachments))
+    root.bind("<Control-o>", doit(load_attachments))
 
-    root.bind("<Control-1>", lambda e: toggle_pane(tree))
-    root.bind("<Control-2>", lambda e: toggle_pane(canvas))
-    root.bind("<Control-3>", lambda e: toggle_pane(text))
-    root.bind("<Control-space>", lambda e: focus_canvas())
+    root.bind("<Control-1>", doit(lambda: toggle_pane(tree)))
+    root.bind("<Control-2>", doit(lambda: toggle_pane(canvas)))
+    root.bind("<Control-3>", doit(lambda: toggle_pane(text)))
+    root.bind("<Control-space>", doit(focus_canvas))
 
     widgets["panes"] = panes = tk.PanedWindow(
         root,
@@ -1346,14 +1355,14 @@ def main():
     panes.sash_place(0, 200, 0)
     panes.sash_place(1, 900, 0)
 
-    tree.bind("<<TreeviewSelect>>", on_tree_select)
+    tree.bind("<<TreeviewSelect>>", doit(on_tree_select))
 
-    canvas.bind("<ButtonPress-1>", on_canvas_button_press)
-    canvas.bind("<B1-Motion>", on_canvas_motion)
-    canvas.bind("<Motion>", on_canvas_hover)
-    canvas.bind("<ButtonRelease-1>", on_canvas_button_release)
-    canvas.bind("<Leave>", on_canvas_mouse_leaves)
-    canvas.bind("<Configure>", on_canvas_configure)
+    canvas.bind("<ButtonPress-1>", doit(on_canvas_button_press))
+    canvas.bind("<B1-Motion>", doit(on_canvas_motion))
+    canvas.bind("<Motion>", doit(on_canvas_hover))
+    canvas.bind("<ButtonRelease-1>", doit(on_canvas_button_release))
+    canvas.bind("<Leave>", doit(on_canvas_mouse_leaves))
+    canvas.bind("<Configure>", doit(on_canvas_configure))
 
     # -----------------
     # BOOT
