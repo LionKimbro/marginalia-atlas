@@ -35,7 +35,12 @@ G_PANES = {
 
 g = {
     "selected": None,  # currently selected id
-    "module_highlight": None  # module name or None
+    "module_highlight": None,  # module name or None
+
+    "cam_x": 0,  # camera X, Y position
+    "cam_y": 0,
+    "zoom_num": 1,  # zoom numerator
+    "zoom_den": 1  # zoom denominator
 }
 
 widgets = {
@@ -109,12 +114,20 @@ G_CANVAS = {}
 # Register (CUR) Support
 # ============================================================
 
+S = []  # stack
+
 CUR = {
     "item_id": None,  # register: currently iterated item
     "item_canvas_data": None,  # register: currently iterated item's G_CANVAS data
     "item_attachment_data": None,  # register: currently iterated item's G_ATTACH data
     "item_inv": None,  # register: currently iterated item's inventory record
-    "item_modules": None  # register: current iterated item's modules
+    "item_modules": None,  # register: current iterated item's modules
+
+    "event": None,  # register: current event processing
+    
+    "x": 0, "y": 0,  # pt register
+    "x0": 0, "y0": 0, "x1": 0, "y1": 0,  # rect register
+    "coord_type": "w"  # world (w) or canvas (c) space
 }
 
 def iterate_item(item_id):
@@ -133,6 +146,294 @@ def foreach_item(fn):
     for item_id in G_CANVAS:
         iterate_item(item_id)
         fn()
+
+
+# ============================================================
+# Coordinates Machine
+# ============================================================
+
+# ------------------------------------------------------------
+# Machine State
+# ------------------------------------------------------------
+#
+# Registers:
+#   CUR["x"], CUR["y"]                     # point register
+#   CUR["x0"], CUR["y0"], CUR["x1"], CUR["y1"]   # rect register
+#   CUR["coord_type"] = "w" | "c"          # world or canvas space
+#
+# Stack:
+#   S = []     # stores snapshots of point or rect registers
+#
+# Invariant:
+#   Point and rect registers are ALWAYS in the same coord space.
+# ------------------------------------------------------------
+
+
+# -- Load / Store (World <-> Machine) ------------------------
+
+def load_rect(src):
+    """
+    Load rectangle into rect registers.
+
+    src:
+        "attachment"  -> load G_ATTACH[CUR["item_id"]]["bbox"]
+
+    Effects:
+        CUR["x0"], CUR["y0"], CUR["x1"], CUR["y1"] set
+        CUR["coord_type"] set to "w"
+    """
+    if src == "attachment":
+        item_id = CUR["item_id"]
+        x0, y0, x1, y1 = G_ATTACH[item_id]["bbox"]
+        CUR["x0"] = x0
+        CUR["y0"] = y0
+        CUR["x1"] = x1
+        CUR["y1"] = y1
+        CUR["coord_type"] = "w"
+    else:
+        raise ValueError(f"load_rect: unknown src '{src}'")
+
+
+def store_rect(dst):
+    """
+    Store rect registers into world data.
+
+    dst:
+        "attachment" -> write to G_ATTACH[CUR["item_id"]]["bbox"]
+
+    Requires:
+        CUR["coord_type"] == "w"
+
+    Effects:
+        World geometry updated from rect registers.
+    """
+    if dst == "attachment":
+        if CUR.get("coord_type") != "w":
+            raise RuntimeError("store_rect: coord_type must be 'w' to store to attachment")
+        
+        item_id = CUR["item_id"]
+        G_ATTACH[item_id]["bbox"] = (
+            CUR["x0"],
+            CUR["y0"],
+            CUR["x1"],
+            CUR["y1"],
+        )
+    else:
+        raise ValueError(f"store_rect: unknown dst '{dst}'")
+
+
+def load_pt(src):
+    """
+    Load point into point registers.
+
+    src:
+        "event"   -> load from last mouse event (screen coords)
+        "center"  -> load rect center point
+        "nw" | "ne" | "se" | "sw" -> load rect corner
+
+    Effects:
+        CUR["x"], CUR["y"] set
+        coord space unchanged (except "event" which sets to "c")
+    """
+    if src == "event":
+        ev = CUR.get("event")
+        if ev is None:
+            raise RuntimeError("load_pt('event'): no event in CUR")
+        CUR["x"] = ev.x
+        CUR["y"] = ev.y
+        CUR["coord_type"] = "c"
+        return
+
+    x0 = CUR["x0"]; y0 = CUR["y0"]; x1 = CUR["x1"]; y1 = CUR["y1"]
+
+    if src == "center":
+        CUR["x"] = (x0 + x1) / 2
+        CUR["y"] = (y0 + y1) / 2
+
+    elif src == "nw":
+        CUR["x"] = x0; CUR["y"] = y0
+    elif src == "ne":
+        CUR["x"] = x1; CUR["y"] = y0
+    elif src == "se":
+        CUR["x"] = x1; CUR["y"] = y1
+    elif src == "sw":
+        CUR["x"] = x0; CUR["y"] = y1
+
+    else:
+        raise ValueError(f"load_pt: unknown src '{src}'")
+
+
+def store_pt(dst):
+    """
+    Store point registers back into rect geometry.
+
+    dst:
+        "nw" | "ne" | "se" | "sw" | "center"
+
+    Effects:
+        Updates rect registers based on point registers.
+        coord space unchanged.
+    """
+    x = CUR["x"]; y = CUR["y"]
+
+    if dst == "center":
+        # move entire rect so its center becomes (x, y)
+        x0 = CUR["x0"]; y0 = CUR["y0"]; x1 = CUR["x1"]; y1 = CUR["y1"]
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
+        dx = x - cx
+        dy = y - cy
+        CUR["x0"] = x0 + dx
+        CUR["y0"] = y0 + dy
+        CUR["x1"] = x1 + dx
+        CUR["y1"] = y1 + dy
+        return
+
+    if dst == "nw":
+        CUR["x0"] = x; CUR["y0"] = y
+    elif dst == "ne":
+        CUR["x1"] = x; CUR["y0"] = y
+    elif dst == "se":
+        CUR["x1"] = x; CUR["y1"] = y
+    elif dst == "sw":
+        CUR["x0"] = x; CUR["y1"] = y
+    else:
+        raise ValueError(f"store_pt: unknown dst '{dst}'")
+
+
+# -- Projection (Camera Transform) ---------------------------
+
+def project_to(dst):
+    """
+    Project all registers to new coordinate space.
+
+    dst:
+        "c"  -> project world -> canvas (apply camera + viewport + zoom)
+        "w"  -> unproject canvas -> world
+
+    Effects:
+        Transforms:
+            CUR["x"], CUR["y"]
+            CUR["x0"], CUR["y0"], CUR["x1"], CUR["y1"]
+        Sets:
+            CUR["coord_type"] = dst
+
+    Notes:
+        Camera and viewport math live ONLY here.
+        All math is integer; zoom is rational (num/den).
+    """
+    src = CUR.get("coord_type")
+    if src == dst:
+        return
+
+    cam_x = g["cam_x"]
+    cam_y = g["cam_y"]
+    zn = g["zoom_num"]
+    zd = g["zoom_den"]
+
+    canvas = W("c")
+    vcx = canvas.winfo_width() // 2
+    vcy = canvas.winfo_height() // 2
+
+    def w_to_c(x, y):
+        return (
+            ((x - cam_x) * zn) // zd + vcx,
+            ((y - cam_y) * zn) // zd + vcy,
+        )
+
+    def c_to_w(x, y):
+        return (
+            ((x - vcx) * zd) // zn + cam_x,
+            ((y - vcy) * zd) // zn + cam_y,
+        )
+
+    if src == "w" and dst == "c":
+        CUR["x"], CUR["y"] = w_to_c(CUR["x"], CUR["y"])
+        CUR["x0"], CUR["y0"] = w_to_c(CUR["x0"], CUR["y0"])
+        CUR["x1"], CUR["y1"] = w_to_c(CUR["x1"], CUR["y1"])
+
+    elif src == "c" and dst == "w":
+        CUR["x"], CUR["y"] = c_to_w(CUR["x"], CUR["y"])
+        CUR["x0"], CUR["y0"] = c_to_w(CUR["x0"], CUR["y0"])
+        CUR["x1"], CUR["y1"] = c_to_w(CUR["x1"], CUR["y1"])
+
+    else:
+        raise RuntimeError(f"project_to: invalid transition {src} -> {dst}")
+
+    CUR["coord_type"] = dst
+
+
+# -- Geometry Ops (Pure Spatial) -----------------------------
+
+def slide_pt(dx, dy):
+    """
+    Translate point registers by (dx, dy) in current coord space.
+    """
+    CUR["x"] += dx
+    CUR["y"] += dy
+
+
+def slide_rect(dx, dy):
+    """
+    Translate rect registers by (dx, dy) in current coord space.
+    """
+    CUR["x0"] += dx
+    CUR["y0"] += dy
+    CUR["x1"] += dx
+    CUR["y1"] += dy
+
+
+def explode_pt(size):
+    """
+    Convert point register into rect register centered on point.
+
+    Effects:
+        rect = (x-size, y-size, x+size, y+size)
+    """
+    x = CUR["x"]
+    y = CUR["y"]
+    CUR["x0"] = x - size
+    CUR["y0"] = y - size
+    CUR["x1"] = x + size
+    CUR["y1"] = y + size
+
+
+# -- Stack Ops (Context Save/Restore) ------------------------
+
+def push_pt():
+    S.append((CUR["x"], CUR["y"], CUR.get("coord_type")))
+
+
+def pop_pt():
+    if not S:
+        raise RuntimeError("pop_pt: stack empty")
+
+    x, y, coord_type = S.pop()
+    CUR["x"] = x
+    CUR["y"] = y
+    CUR["coord_type"] = coord_type
+
+
+def push_rect():
+    S.append((
+        CUR["x0"],
+        CUR["y0"],
+        CUR["x1"],
+        CUR["y1"],
+        CUR.get("coord_type"),
+    ))
+
+
+def pop_rect():
+    if not S:
+        raise RuntimeError("pop_rect: stack empty")
+
+    x0, y0, x1, y1, coord_type = S.pop()
+    CUR["x0"] = x0
+    CUR["y0"] = y0
+    CUR["x1"] = x1
+    CUR["y1"] = y1
+    CUR["coord_type"] = coord_type
 
 
 # ============================================================
@@ -253,11 +554,17 @@ def render_all():
         # ============================================================
 
         if D["handles_shouldexist"]:
+            tags = ["nw", "ne", "se", "sw"]
+            
             if not D["handles"]:
                 # create 4 handles
                 handles = []
-                for _ in range(4):
-                    h = canvas.create_rectangle(0, 0, 0, 0, fill="#ffcc00", outline="#000000")
+                for tag in tags:
+                    h = canvas.create_rectangle(
+                        0, 0, 0, 0,
+                        fill="#ffcc00", outline="#000000",
+                        tags=("handle", tag)
+                    )
                     handles.append(h)
                 D["handles"] = handles
 
@@ -313,18 +620,19 @@ def set_module_highlight(module):
 # ============================================================
 
 def apply_drag(item_id, dx, dy):
-    x0, y0, x1, y1 = G_ATTACH[item_id]["bbox"]
-
+    load_rect("attachment")
+    
     if G_DRAG["handle"]:
+        print("dragging corner")
         c = G_DRAG["corner"]
-        if c == "nw": x0 += dx; y0 += dy
-        elif c == "ne": x1 += dx; y0 += dy
-        elif c == "se": x1 += dx; y1 += dy
-        elif c == "sw": x0 += dx; y1 += dy
+        load_pt(c)
+        slide_pt(dx,dy)
+        store_pt(c)
     else:
-        x0 += dx; y0 += dy; x1 += dx; y1 += dy
+        print("dragging box")
+        slide_rect(dx,dy)
 
-    G_ATTACH[item_id]["bbox"] = (x0, y0, x1, y1)
+    store_rect("attachment")
 
 
 # ============================================================
@@ -576,6 +884,7 @@ def rule_module_highlight():
 # ============================================================
 
 def on_tree_select(event):
+    CUR["event"] = event
     tree = W("t")
     sel = tree.selection()
     if not sel:
@@ -595,12 +904,14 @@ def on_tree_select(event):
 
 
 def on_delete_key(event=None):
+    CUR["event"] = event
     selected = g["selected"]
     if selected in G_CANVAS:
         delete_attachment(selected)
 
 
 def on_canvas_hover(event):
+    CUR["event"] = event
     canvas = W("c")
     items = canvas.find_withtag("current")
     item = items[0] if items else None
@@ -613,11 +924,13 @@ def on_canvas_hover(event):
 
 
 def on_canvas_leave(event):
+    CUR["event"] = event
     G_HOVER["canvas_item_id"] = None
     widgets["canvas"].config(cursor="")
 
 
 def on_canvas_button_press(event):
+    CUR["event"] = event
     selected = g["selected"]
     canvas_items = widgets["canvas"].find_withtag("current")
 
@@ -631,6 +944,7 @@ def on_canvas_button_press(event):
     if not item_id:
         return
 
+    iterate_item(item_id)
     set_drag(
         item_id,
         x=event.x,
@@ -643,7 +957,9 @@ def on_canvas_button_press(event):
 
 
 def on_canvas_motion(event):
+    CUR["event"] = event
     item_id = G_DRAG["item_id"]
+    iterate_item(item_id)
 
     if not item_id or item_id not in G_CANVAS:
         set_drag(None)
@@ -659,6 +975,7 @@ def on_canvas_motion(event):
 
 
 def on_canvas_button_release(event):
+    CUR["event"] = event
     set_drag(None)
     G_HOVER["canvas_item_id"] = None
     widgets["canvas"].config(cursor="")
