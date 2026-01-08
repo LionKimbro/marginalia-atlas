@@ -40,7 +40,10 @@ g = {
     "cam_x": 0,  # camera X, Y position
     "cam_y": 0,
     "zoom_num": 1,  # zoom numerator
-    "zoom_den": 1  # zoom denominator
+    "zoom_den": 1,  # zoom denominator
+
+    "canvas_view_w": 0,  # We record this, because Tk is weirdly forgetful
+    "canvas_view_h": 0
 }
 
 widgets = {
@@ -230,6 +233,7 @@ def load_pt(src):
         "event"   -> load from last mouse event (screen coords)
         "center"  -> load rect center point
         "nw" | "ne" | "se" | "sw" -> load rect corner
+        "label"   -> load CUR["item_canvas_data"]'s label coordinates
 
     Effects:
         CUR["x"], CUR["y"] set
@@ -258,6 +262,10 @@ def load_pt(src):
         CUR["x"] = x1; CUR["y"] = y1
     elif src == "sw":
         CUR["x"] = x0; CUR["y"] = y1
+
+    elif src == "label":
+        CUR["x"], CUR["y"] = CUR["item_canvas_data"]["label_coord"]
+        CUR["coord_type"] = "w"
 
     else:
         raise ValueError(f"load_pt: unknown src '{src}'")
@@ -300,6 +308,14 @@ def store_pt(dst):
     else:
         raise ValueError(f"store_pt: unknown dst '{dst}'")
 
+    
+# -- Convenience Access --------------------------------------
+
+def get_xy():
+    return (CUR["x"], CUR["y"])
+
+def get_xyxy():
+    return (CUR["x0"], CUR["y0"], CUR["x1"], CUR["y1"])
 
 # -- Projection (Camera Transform) ---------------------------
 
@@ -332,8 +348,8 @@ def project_to(dst):
     zd = g["zoom_den"]
 
     canvas = W("c")
-    vcx = canvas.winfo_width() // 2
-    vcy = canvas.winfo_height() // 2
+    vcx = g["canvas_view_w"] // 2
+    vcy = g["canvas_view_h"] // 2
 
     def w_to_c(x, y):
         return (
@@ -508,17 +524,22 @@ def render_all():
 
     for item_id, D in G_CANVAS.items():
 
+        CUR["item_id"] = item_id
+        CUR["item_canvas_data"] = D
+        
         # ============================================================
         # RECTANGLE
         # ============================================================
 
         if D["rect_shouldexist"]:
             if D["rect"] is None:
-                # create
                 D["rect"] = canvas.create_rectangle(0, 0, 0, 0)
 
-            # apply intent
-            canvas.coords(D["rect"], *D["rect_coords"])
+            # world -> canvas via coordinate machine
+            load_rect("attachment")
+            project_to("c")
+
+            canvas.coords(D["rect"], *get_xyxy())
             canvas.itemconfigure(
                 D["rect"],
                 outline=D["rect_outline"],
@@ -538,7 +559,11 @@ def render_all():
             if D["label"] is None:
                 D["label"] = canvas.create_text(0, 0, anchor="n")
 
-            canvas.coords(D["label"], *D["label_coord"])
+            # world -> canvas via coordinate machine
+            load_pt("label")
+            project_to("c")
+
+            canvas.coords(D["label"], *get_xy())
             canvas.itemconfigure(
                 D["label"],
                 text=D["label_text"],
@@ -567,10 +592,12 @@ def render_all():
                     )
                     handles.append(h)
                 D["handles"] = handles
-
-            # position handles from rect_coords
-            x0, y0, x1, y1 = D["rect_coords"]
-            corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+            
+            # corners derivced from world rect -> projected per-handle
+            load_rect("attachment")
+            project_to("c")
+            x0,y0, x1, y1 = get_xyxy()
+            corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]  # canvas-coordinates!
 
             for h, (x, y) in zip(D["handles"], corners):
                 canvas.coords(h, x - 5, y - 5, x + 5, y + 5)
@@ -981,6 +1008,13 @@ def on_canvas_button_release(event):
     widgets["canvas"].config(cursor="")
 
 
+def on_canvas_configure(event):
+    # We have to do this, because Tk is weirdly forgetful.
+    g["canvas_view_w"] = event.width
+    g["canvas_view_h"] = event.height
+    sync_all()
+
+
 # ============================================================
 # UI SETUP
 # ============================================================
@@ -1067,15 +1101,15 @@ def load_attachments(path="attachments.json"):
             "label_color": "white",
         }
 
+    print(f"[loaded] {path}")
+    
     sync_all()
-
+    
     if layout:
         set_pane_layout(layout)
-
+    
     if window_geom:
         set_window_geometry(window_geom)
-
-    print(f"[loaded] {path}")
 
 
 def toggle_pane(widget):
@@ -1307,6 +1341,7 @@ def main():
     canvas.bind("<Motion>", on_canvas_hover)
     canvas.bind("<ButtonRelease-1>", on_canvas_button_release)
     canvas.bind("<Leave>", on_canvas_leave)
+    canvas.bind("<Configure>", on_canvas_configure)
 
     # -----------------
     # BOOT
@@ -1317,9 +1352,10 @@ def main():
 
     populate_tree_grouped_by_module()
     
+    root.update_idletasks()
     load_attachments()
     root.update_idletasks()
-
+    
     root.mainloop()
 
 if __name__ == "__main__":
