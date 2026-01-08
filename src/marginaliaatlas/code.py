@@ -946,21 +946,18 @@ def start_drag(mode):
 
     G_DRAG.clear()
     G_DRAG["mode"] = mode
-    G_DRAG["x"] = ev.x if ev else None
-    G_DRAG["y"] = ev.y if ev else None
+    G_DRAG["x"] = ev.x
+    G_DRAG["y"] = ev.y
 
     if mode == "item":
-        top = canvas_top()
-        item_id = item_id_for_canvas_item(top) if top else None
-
-        G_DRAG["item_id"] = item_id
-        G_DRAG["canvas_item"] = top
+        G_DRAG["item_id"] = item_id = CUR["top_item_id"]
+        G_DRAG["canvas_item"] = top = CUR["top"]
         G_DRAG["handle"] = top if top and is_handle(top) else None
         G_DRAG["corner"] = corner_for_handle(top) if top and is_handle(top) else None
-
-        if item_id and g["selected"] != item_id:
+        
+        if g["selected"] != item_id:
             set_selected(item_id)
-
+    
     elif mode == "pan":
         G_DRAG["item_id"] = None
         G_DRAG["canvas_item"] = None
@@ -974,12 +971,7 @@ def cancel_drag():
     G_DRAG.clear()
 
 def on_canvas_button_press():
-    top = canvas_top()
-    
-    if top and item_id_for_canvas_item(top):
-        start_drag("item")
-    else:
-        start_drag("pan")
+    start_drag("item" if CUR["top_item_id"] else "pan")
 
 
 def on_canvas_motion():
@@ -1296,6 +1288,12 @@ def dispatch_event(event, handler_fn):
 
 def main():
     def doit(fn):
+        """
+        Wrap a handler function so it is called through dispatch_event.
+        
+        Returns a Tk-compatible callback that first normalizes the event
+        into CUR, then invokes the given handler with no arguments.
+        """
         return lambda e: dispatch_event(e, fn)
     
     widgets["root"] = root = tk.Tk()
