@@ -1116,6 +1116,7 @@ def load_attachments(path="attachments.json"):
 
 
 def toggle_pane(widget):
+    panes = W("p")
     name = widget._pane_name
 
     if G_PANES[name]:
@@ -1126,6 +1127,7 @@ def toggle_pane(widget):
         G_PANES[name] = True
 
 def focus_canvas():
+    panes, tree, text = W("ptx")
     for w in (tree, text):
         if G_PANES[w._pane_name]:
             panes.forget(w)
