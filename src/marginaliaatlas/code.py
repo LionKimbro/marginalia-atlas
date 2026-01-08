@@ -261,8 +261,11 @@ def load_pt(src):
     x0 = CUR["x0"]; y0 = CUR["y0"]; x1 = CUR["x1"]; y1 = CUR["y1"]
 
     if src == "center":
-        CUR["x"] = (x0 + x1) / 2
-        CUR["y"] = (y0 + y1) / 2
+        CUR["x"] = (x0 + x1) // 2
+        CUR["y"] = (y0 + y1) // 2
+    elif src == "center-south":
+        CUR["x"] = (x0 + x1) // 2
+        CUR["y"] = y1
 
     elif src == "nw":
         CUR["x"] = x0; CUR["y"] = y0
@@ -733,13 +736,19 @@ def rule_handles():
 # ATTACHMENT LIFECYCLE
 # ============================================================
 
-def attach_new_square(item_id, x, y):
+def attach_new_square():
     canvas = W("c")
-    size = 60
+    size = 40
+
+    item_id = g["selected"]
+    iterate_item(item_id)
 
     # ---- world geometry (source of truth) ----
-    x0, y0 = x - size // 2, y - size // 2
-    x1, y1 = x + size // 2, y + size // 2
+    load_pt("event")
+    project_to("w")
+    explode_pt(size//2)
+
+    x0, y0, x1, y1 = get_xyxy()
 
     G_ATTACH[item_id] = {
         "bbox": (x0, y0, x1, y1),
@@ -747,8 +756,9 @@ def attach_new_square(item_id, x, y):
     }
 
     # ---- projected render intent ----
-    cx = (x0 + x1) / 2
-    cy = y1 + 10
+    load_pt("center-south")
+    slide_pt(0,10)
+    cx, cy = get_xy()
 
     G_CANVAS[item_id] = {
         # canvas identities
@@ -971,8 +981,10 @@ def cancel_drag():
     G_DRAG.clear()
 
 def on_canvas_button_press():
-    start_drag("item" if CUR["top_item_id"] else "pan")
-
+    if not CUR["top"] and g["selected"] and g["selected"] not in G_CANVAS:
+        attach_new_square()
+    else:
+        start_drag("item" if CUR["top_item_id"] else "pan")
 
 def on_canvas_motion():
     event = CUR["event"]
