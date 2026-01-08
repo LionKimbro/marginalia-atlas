@@ -1352,7 +1352,6 @@ def main():
 
     populate_tree_grouped_by_module()
     
-    root.update_idletasks()
     load_attachments()
     root.update_idletasks()
     
