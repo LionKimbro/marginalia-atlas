@@ -19,10 +19,11 @@ G_DRAG = {
     "y": 0,
     "handle": None,
     "corner": None,
+    "mode": None  # "item" | "pan"
 }
 
 G_HOVER = {
-    "canvas_item_id": None,
+    "canvas_item": None,
 }
 
 HANDLE_SIZE = 6
@@ -650,13 +651,11 @@ def apply_drag(item_id, dx, dy):
     load_rect("attachment")
     
     if G_DRAG["handle"]:
-        print("dragging corner")
         c = G_DRAG["corner"]
         load_pt(c)
         slide_pt(dx,dy)
         store_pt(c)
     else:
-        print("dragging box")
         slide_rect(dx,dy)
 
     store_rect("attachment")
@@ -694,9 +693,9 @@ def corner_for_handle(item_id):
     return None
 
 
-def item_id_for_canvas_item(canvas_item_id):
+def item_id_for_canvas_item(canvas_item):
     for item_id, data in G_CANVAS.items():
-        if canvas_item_id in (
+        if canvas_item in (
             data.get("rect"),
             data.get("label"),
             *data.get("handles", []),
@@ -706,11 +705,11 @@ def item_id_for_canvas_item(canvas_item_id):
     return None
 
 
-def cursor_for_item(canvas_item_id):
-    if not canvas_item_id:
+def cursor_for_item(canvas_item):
+    if not canvas_item:
         return ""
 
-    return "sizing" if is_handle(canvas_item_id) else "fleur"
+    return "sizing" if is_handle(canvas_item) else "fleur"
 
 
 # ============================================================
@@ -785,25 +784,21 @@ def delete_attachment(item_id):
 # DRAG SYNC
 # ============================================================
 
-def set_drag(item_id=None, *, x=None, y=None, handle=None, corner=None):
-    """
-    The ONLY place drag state is allowed to change.
-    Passing item_id=None cancels the drag.
-    """
-    if item_id is None:
-        G_DRAG.update(item_id=None, handle=None, corner=None)
-        return
+def cancel_drag():
+    G_DRAG.update(item_id=None, handle=None, corner=None, mode=None)
 
-    # Lock selection to dragged item_id
-    if g["selected"] != item_id:
-        set_selected(item_id)
-
+def set_drag(*, item_id=None, x=None, y=None, handle=None, corner=None, mode=None):
+    """
+    This, and cancel_drag, are the ONLY places drag state is allowed
+    to change.
+    """    
     G_DRAG.update(
         item_id=item_id,
         x=x,
         y=y,
         handle=handle,
         corner=corner,
+        mode=mode
     )
 
 
@@ -910,6 +905,11 @@ def rule_module_highlight():
 # EVENT HANDLERS
 # ============================================================
 
+def canvas_top():
+    """helper: Return the first canvas item labelled 'current'."""
+    items = widgets["canvas"].find_withtag("current")
+    return items[0] if items else None
+
 def on_tree_select(event):
     CUR["event"] = event
     tree = W("t")
@@ -939,72 +939,84 @@ def on_delete_key(event=None):
 
 def on_canvas_hover(event):
     CUR["event"] = event
-    canvas = W("c")
-    items = canvas.find_withtag("current")
-    item = items[0] if items else None
+    item = canvas_top()
 
-    if item == G_HOVER["canvas_item_id"]:
+    if item == G_HOVER["canvas_item"]:
         return
 
-    G_HOVER["canvas_item_id"] = item
-    canvas.config(cursor=cursor_for_item(item))
+    G_HOVER["canvas_item"] = item
+    widgets["canvas"].config(cursor=cursor_for_item(item))
 
 
-def on_canvas_leave(event):
+def on_canvas_mouse_leaves(event):
     CUR["event"] = event
-    G_HOVER["canvas_item_id"] = None
+    G_HOVER["canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
 def on_canvas_button_press(event):
     CUR["event"] = event
-    selected = g["selected"]
-    canvas_items = widgets["canvas"].find_withtag("current")
+    
+    top = canvas_top()
 
-    if not canvas_items:
+    if top:
+        item_id = item_id_for_canvas_item(top)
+        if not item_id:
+            return  # clicked SOMETHING, ... Just not anything relevant.
+        iterate_item(item_id)
+        
+        set_drag(
+            item_id=item_id,
+            x=event.x,
+            y=event.y,
+            handle=top if is_handle(top) else None,
+            corner=corner_for_handle(top) if is_handle(top) else None,
+            mode="item"
+        )
+        
+        set_selected(item_id)
+    else:
+        selected = g["selected"]
         if selected and selected not in G_CANVAS:
             attach_new_square(selected, event.x, event.y)
-        return
-
-    canvas_item = canvas_items[0]
-    item_id = item_id_for_canvas_item(canvas_item)
-    if not item_id:
-        return
-
-    iterate_item(item_id)
-    set_drag(
-        item_id,
-        x=event.x,
-        y=event.y,
-        handle=canvas_item if is_handle(canvas_item) else None,
-        corner=corner_for_handle(canvas_item) if is_handle(canvas_item) else None,
-    )
-    
-    set_selected(item_id)
+        set_drag(item_id=None, x=event.x, y=event.y, handle=None, corner=None, mode="pan")
 
 
 def on_canvas_motion(event):
     CUR["event"] = event
-    item_id = G_DRAG["item_id"]
-    iterate_item(item_id)
 
-    if not item_id or item_id not in G_CANVAS:
-        set_drag(None)
-        return
+    if G_DRAG["mode"] == "pan":
+        dx = event.x - G_DRAG["x"]
+        dy = event.y - G_DRAG["y"]
 
-    dx = event.x - G_DRAG["x"]
-    dy = event.y - G_DRAG["y"]
+        # move camera opposite to mouse motion
+        g["cam_x"] -= dx * g["zoom_den"] // g["zoom_num"]
+        g["cam_y"] -= dy * g["zoom_den"] // g["zoom_num"]
 
-    apply_drag(item_id, dx, dy)
-    sync_all()
+        G_DRAG["x"], G_DRAG["y"] = event.x, event.y
+        sync_all()
+        
+    elif G_DRAG["mode"] == "item":
+        item_id = G_DRAG["item_id"]
+        iterate_item(item_id)
 
-    G_DRAG["x"], G_DRAG["y"] = event.x, event.y
+        if not item_id or item_id not in G_CANVAS:
+            set_drag(None)
+            return
+
+        dx = event.x - G_DRAG["x"]
+        dy = event.y - G_DRAG["y"]
+
+        apply_drag(item_id, dx, dy)
+        sync_all()
+
+        G_DRAG["x"], G_DRAG["y"] = event.x, event.y
 
 
 def on_canvas_button_release(event):
     CUR["event"] = event
-    set_drag(None)
-    G_HOVER["canvas_item_id"] = None
+    cancel_drag()
+    G_HOVER["canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
@@ -1340,7 +1352,7 @@ def main():
     canvas.bind("<B1-Motion>", on_canvas_motion)
     canvas.bind("<Motion>", on_canvas_hover)
     canvas.bind("<ButtonRelease-1>", on_canvas_button_release)
-    canvas.bind("<Leave>", on_canvas_leave)
+    canvas.bind("<Leave>", on_canvas_mouse_leaves)
     canvas.bind("<Configure>", on_canvas_configure)
 
     # -----------------
