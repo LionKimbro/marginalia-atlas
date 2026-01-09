@@ -570,7 +570,7 @@ def render_all():
 
         if D["label_shouldexist"]:
             if D["label"] is None:
-                D["label"] = canvas.create_text(0, 0, anchor="n")
+                D["label"] = canvas.create_text(0, 0, anchor="w")
 
             # world -> canvas via coordinate machine
             load_pt("label")
@@ -756,9 +756,9 @@ def attach_new_square():
     }
 
     # ---- projected render intent ----
-    load_pt("center-south")
-    slide_pt(0,10)
-    cx, cy = get_xy()
+    load_pt("sw")
+    slide_pt(5,10)
+    label_x, label_y = get_xy()
 
     G_CANVAS[item_id] = {
         # canvas identities
@@ -776,7 +776,7 @@ def attach_new_square():
         "rect_width": 1,
         "rect_fill": "#88ccff",
 
-        "label_coord": (cx, cy),
+        "label_coord": (label_x, label_y),
         "label_text": G_INV[item_id]["symbol"],
         "label_color": "white",
     }
@@ -832,9 +832,9 @@ def rule_default_appearance():
 
     # project label (centered under rect)
     if label_id is not None:
-        cx = (x0 + x1) / 2
-        cy = y1 + 10
-        D["label_coord"] = (cx,cy)
+        label_x = x0 + 5
+        label_y = y1 + 10
+        D["label_coord"] = (label_x, label_y)
         D["label_color"] = "white"
 
 def rule_default_appearance():
@@ -851,7 +851,7 @@ def rule_default_appearance():
     D["rect_width"] = 1
     D["rect_fill"] = "#88ccff"
 
-    cx = (x0 + x1) / 2
+    cx = x0 + 5
     cy = y1 + 10
     D["label_coord"] = (cx, cy)
     D["label_text"] = G_INV[CUR["item_id"]]["symbol"]
