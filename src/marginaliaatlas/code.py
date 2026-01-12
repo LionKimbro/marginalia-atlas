@@ -22,8 +22,6 @@ G_DRAG = {
     "mode": None  # "item" | "pan"
 }
 
-HANDLE_SIZE = 6
-
 G_PANES = {
     "tree": True,
     "canvas": True,
@@ -527,6 +525,27 @@ def W(codes=None):
     return tuple(result)
 
 
+SHIFT_MASK = 0x0001
+CTRL_MASK  = 0x0004
+ALT_MASK   = 0x0008
+
+_MOD_MASKS = {
+    "C": CTRL_MASK,
+    "S": SHIFT_MASK,
+    "A": ALT_MASK
+}
+
+def keys_down(keycodes):
+    state = CUR["event"].state
+    for k in keycodes:
+        mask = _MOD_MASKS.get(k)
+        if mask is None:
+            raise ValueError(f"Unknown modifier code: {k}")
+        if not (state & mask):
+            return False
+    return True
+
+
 # ============================================================
 # Canvas Rendering
 # ============================================================
@@ -671,18 +690,21 @@ def set_module_highlight(module):
 # DRAG / GEOMETRY HELPERS
 # ============================================================
 
-def apply_drag(item_id, dx, dy):
-    load_rect("attachment")
-    
-    if G_DRAG["handle"]:
-        c = G_DRAG["corner"]
-        load_pt(c)
-        slide_pt(dx,dy)
-        store_pt(c)
-    else:
-        slide_rect(dx,dy)
-
-    store_rect("attachment")
+def apply_drag(dx, dy):
+    for item_id in list(selection_set):
+        iterate_item(item_id)
+        
+        load_rect("attachment")
+        
+        if G_DRAG["handle"]:
+            c = G_DRAG["corner"]
+            load_pt(c)
+            slide_pt(dx,dy)
+            store_pt(c)
+        else:
+            slide_rect(dx,dy)
+        
+        store_rect("attachment")
 
 
 # ============================================================
@@ -1006,11 +1028,15 @@ def start_drag(mode):
         G_DRAG["canvas_item"] = top = CUR["top"]
         G_DRAG["handle"] = top if top and is_handle(top) else None
         G_DRAG["corner"] = corner_for_handle(top) if top and is_handle(top) else None
-        
-        if not is_selected():
+
+        if keys_down("C"):
+            toggle_selected()
+        elif not is_selected():
             set_selected()
     
     elif mode == "pan":
+        if not keys_down("C"):
+            clear_selection()
         G_DRAG["item_id"] = None
         G_DRAG["canvas_item"] = None
         G_DRAG["handle"] = None
@@ -1053,7 +1079,7 @@ def on_canvas_motion():
         dx = event.x - G_DRAG["x"]
         dy = event.y - G_DRAG["y"]
 
-        apply_drag(item_id, dx, dy)
+        apply_drag(dx, dy)
         sync_all()
 
         G_DRAG["x"], G_DRAG["y"] = event.x, event.y
