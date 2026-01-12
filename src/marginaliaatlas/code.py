@@ -535,6 +535,8 @@ def W(codes=None):
 def render_all():
     canvas = W("c")
 
+    orphan_candidates = set(canvas.find_withtag("rendered"))
+    
     for item_id, D in G_CANVAS.items():
 
         CUR["item_id"] = item_id
@@ -546,8 +548,12 @@ def render_all():
 
         if D["rect_shouldexist"]:
             if D["rect"] is None:
-                D["rect"] = canvas.create_rectangle(0, 0, 0, 0)
-
+                D["rect"] = canvas.create_rectangle(0, 0, 0, 0,
+                                                    tags=("rendered",))
+            else:
+                # It exists, and should not be orphan discarded.
+                orphan_candidates.discard(D["rect"])
+            
             # world -> canvas via coordinate machine
             load_rect("attachment")
             project_to("c")
@@ -561,7 +567,6 @@ def render_all():
             )
         else:
             if D["rect"] is not None:
-                canvas.delete(D["rect"])
                 D["rect"] = None
 
         # ============================================================
@@ -570,8 +575,12 @@ def render_all():
 
         if D["label_shouldexist"]:
             if D["label"] is None:
-                D["label"] = canvas.create_text(0, 0, anchor="w")
-
+                D["label"] = canvas.create_text(0, 0, anchor="w",
+                                                tags=("rendered",))
+            else:
+                # It exists, and should not be orphan discarded.
+                orphan_candidates.discard(D["label"])
+            
             # world -> canvas via coordinate machine
             load_pt("label")
             project_to("c")
@@ -584,7 +593,6 @@ def render_all():
             )
         else:
             if D["label"] is not None:
-                canvas.delete(D["label"])
                 D["label"] = None
 
         # ============================================================
@@ -601,10 +609,13 @@ def render_all():
                     h = canvas.create_rectangle(
                         0, 0, 0, 0,
                         fill="#ffcc00", outline="#000000",
-                        tags=("handle", tag)
+                        tags=("handle", tag, "rendered")
                     )
                     handles.append(h)
                 D["handles"] = handles
+            else:
+                for h in D["handles"]:
+                    orphan_candidates.discard(h)
             
             # corners derivced from world rect -> projected per-handle
             load_rect("attachment")
@@ -617,9 +628,11 @@ def render_all():
 
         else:
             if D["handles"]:
-                for h in D["handles"]:
-                    canvas.delete(h)
-                D["handles"] = []
+                del D["handles"][:]
+
+    # delete orphans
+    for canvas_item in orphan_candidates:
+        canvas.delete(canvas_item)
 
 
 # ============================================================
@@ -947,6 +960,14 @@ def on_canvas_mouse_leaves():
     widgets["canvas"].config(cursor="")
 
 
+def clear_drag():
+    G_DRAG["item_id"] = None
+    G_DRAG["x"] = 0
+    G_DRAG["y"] = 0
+    G_DRAG["handle"] = None
+    G_DRAG["corner"] = None
+    G_DRAG["mode"] = None
+    
 def start_drag(mode):
     """
     Capture drag-start context from current UI state.
@@ -954,7 +975,7 @@ def start_drag(mode):
     """
     ev = CUR["event"]
 
-    G_DRAG.clear()
+    clear_drag()
     G_DRAG["mode"] = mode
     G_DRAG["x"] = ev.x
     G_DRAG["y"] = ev.y
@@ -978,7 +999,7 @@ def start_drag(mode):
         raise ValueError(f"start_drag: unknown mode '{mode}'")
 
 def cancel_drag():
-    G_DRAG.clear()
+    clear_drag()
 
 def on_canvas_button_press():
     if not CUR["top"] and g["selected"] and g["selected"] not in G_CANVAS:
@@ -1128,15 +1149,18 @@ def load_attachments(path="attachments.json"):
 
 
 def toggle_pane(widget):
-    panes = W("p")
     name = widget._pane_name
 
-    if G_PANES[name]:
-        panes.forget(widget)
-        G_PANES[name] = False
-    else:
-        panes.add(widget)
-        G_PANES[name] = True
+    G_PANES[name] = not G_PANES[name]
+    update_panes()
+
+def update_panes():
+    panes = W("p")
+    for name in ("tree", "canvas", "text"):
+        panes.forget(widgets[name])
+    for name in ("tree", "canvas", "text"):
+        if G_PANES[name]:
+            panes.add(widgets[name])
 
 def focus_canvas():
     panes, tree, text = W("ptx")
@@ -1319,9 +1343,9 @@ def main():
     root.bind("<Control-s>", doit(save_attachments))
     root.bind("<Control-o>", doit(load_attachments))
 
-    root.bind("<Control-1>", doit(lambda: toggle_pane(tree)))
-    root.bind("<Control-2>", doit(lambda: toggle_pane(canvas)))
-    root.bind("<Control-3>", doit(lambda: toggle_pane(text)))
+    root.bind("1", doit(lambda: toggle_pane(tree)))
+    root.bind("2", doit(lambda: toggle_pane(canvas)))
+    root.bind("3", doit(lambda: toggle_pane(text)))
     root.bind("<Control-space>", doit(focus_canvas))
 
     widgets["panes"] = panes = tk.PanedWindow(
