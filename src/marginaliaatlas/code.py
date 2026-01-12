@@ -22,10 +22,6 @@ G_DRAG = {
     "mode": None  # "item" | "pan"
 }
 
-G_HOVER = {
-    "canvas_item": None,
-}
-
 HANDLE_SIZE = 6
 
 G_PANES = {
@@ -35,8 +31,8 @@ G_PANES = {
 }
 
 g = {
-    "selected": None,  # currently selected id
     "module_highlight": None,  # module name or None
+    "hover_canvas_item": None,  # formerly G_HOVER["canvas_item"]
 
     "cam_x": 0,  # camera X, Y position
     "cam_y": 0,
@@ -54,6 +50,9 @@ widgets = {
     "canvas": None,
     "text": None
 }
+
+selection_set = set()  # set of item ids that are selected
+
 
 # ============================================================
 # Render State (Projected, Screen-Space)
@@ -742,7 +741,7 @@ def cursor_for_item(canvas_item):
 # ============================================================
 
 def rule_handles():
-    CUR["item_canvas_data"]["handles_shouldexist"] = CUR["item_id"] == g["selected"]
+    CUR["item_canvas_data"]["handles_shouldexist"] = is_only_selected()
 
 
 # ============================================================
@@ -753,9 +752,9 @@ def attach_new_square():
     canvas = W("c")
     size = 40
 
-    item_id = g["selected"]
+    item_id = only_selected()
     iterate_item(item_id)
-
+    
     # ---- world geometry (source of truth) ----
     load_pt("event")
     project_to("w")
@@ -797,35 +796,52 @@ def attach_new_square():
     sync_all()
 
 
-def delete_attachment(item_id):
-    canvas = W("c")
-    if item_id not in G_CANVAS:
-        return
-
-    data = G_CANVAS.pop(item_id)
-    G_ATTACH.pop(item_id, None)
-
-    if g["selected"] == item_id:
-        set_selected(None)
-
-    if G_DRAG["item_id"] == item_id:
+def delete_attachment():
+    item_id = g["item_id"]
+    
+    # de-select
+    if is_selected():
+        toggle_selected()
+    
+    if item_id == G_DRAG["item_id"]:
         cancel_drag()
+    
+    del G_CANVAS[item_id]
+    del G_ATTACH[item_id]
 
 
 # ============================================================
 # SELECTION SYNC
 # ============================================================
 
-def set_selected(item_id):
-    """
-    The ONLY place selection is allowed to change.
-    """
-    if item_id == g["selected"]:
-        return
+def is_selected():
+    return CUR["item_id"] in selection_set
 
-    g["selected"] = item_id
+def is_only_selected():
+    return is_selected() and len(selection_set) == 1
+
+def only_selected():
+    return next(iter(selection_set)) if len(selection_set) == 1 else None
+
+def toggle_selected():
+    item_id = CUR["item_id"]
+    if item_id in selection_set:
+        selection_set.remove(item_id)
+    else:
+        selection_set.add(item_id)
+    sync_all()
+
+def clear_selection():
+    selection_set.clear()
+    sync_all()
+    sync_tree_selection()
+    sync_json_view()
+
+def set_selected():
+    """invariant: set_selected, clear_selection, and toggle_selected are the only places selection can change"""
+    selection_set.clear()
+    selection_set.add(CUR["item_id"])
     g["module_highlight"] = None
-
     sync_all()
     sync_tree_selection()
     sync_json_view()
@@ -872,15 +888,19 @@ def rule_default_appearance():
 
 
 def rule_selected_highlight():
-    if CUR["item_id"] == g["selected"]:
+    if is_selected():
         D = CUR["item_canvas_data"]
         rect = D["rect"]
         D["rect_outline"] = "yellow"
         D["rect_width"] = 3
 
 def sync_tree_selection():
+    # WARNING: THIS IS BROKEN RIGHT NOW.
+    # the code has changed in multiple ways since it was written:
+    # 1. the tree has two layers, and a more complex way of naming its elements
+    # 2. selection has become multiple
     tree = W("t")
-    sel = g["selected"]
+    sel = only_selected()
 
     if sel and tree.exists(sel):
         tree.selection_set(sel)
@@ -888,13 +908,13 @@ def sync_tree_selection():
 
 def sync_json_view():
     text = W("x")
-    sel = g["selected"]
+    item_id = only_selected()
 
-    if not sel:
+    if not item_id:
         text.delete("1.0", "end")
         return
 
-    render_inventory_item(text, G_INV[sel])
+    render_inventory_item(text, G_INV[item_id])
 
 
 # ============================================================
@@ -930,33 +950,34 @@ def on_tree_select():
     
     if iid.startswith("module::"):
         module = iid.split("::", 1)[1]
-        set_selected(None)
+        clear_selection()
         set_module_highlight(module)
         return
 
     if iid.startswith("leaf::"):
         _, _, item_id = iid.split("::", 2)
-        set_selected(item_id)
+        iterate_item(item_id)
+        set_selected()
 
 
 def on_delete_key():
-    selected = g["selected"]
-    if selected in G_CANVAS:
-        delete_attachment(selected)
+    for item_id in set(selection_set):
+        iterate_item(item_id)
+        delete_attachment()
 
 
 def on_canvas_hover():
-    item = canvas_top()
-
-    if item == G_HOVER["canvas_item"]:
+    item = CUR["top"]
+    
+    if item == g["hover_canvas_item"]:
         return
-
-    G_HOVER["canvas_item"] = item
+    
+    g["hover_canvas_item"] = item
     widgets["canvas"].config(cursor=cursor_for_item(item))
 
 
 def on_canvas_mouse_leaves():
-    G_HOVER["canvas_item"] = None
+    g["hover_canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
@@ -986,8 +1007,8 @@ def start_drag(mode):
         G_DRAG["handle"] = top if top and is_handle(top) else None
         G_DRAG["corner"] = corner_for_handle(top) if top and is_handle(top) else None
         
-        if g["selected"] != item_id:
-            set_selected(item_id)
+        if not is_selected():
+            set_selected()
     
     elif mode == "pan":
         G_DRAG["item_id"] = None
@@ -1002,7 +1023,8 @@ def cancel_drag():
     clear_drag()
 
 def on_canvas_button_press():
-    if not CUR["top"] and g["selected"] and g["selected"] not in G_CANVAS:
+    selected_item_id = only_selected()  # None if 0 or >1 items selected
+    if not CUR["top"] and selected_item_id and selected_item_id not in G_CANVAS:
         attach_new_square()
     else:
         start_drag("item" if CUR["top_item_id"] else "pan")
@@ -1039,7 +1061,7 @@ def on_canvas_motion():
 
 def on_canvas_button_release():
     cancel_drag()
-    G_HOVER["canvas_item"] = None
+    g["hover_canvas_item"] = None
     widgets["canvas"].config(cursor="")
 
 
@@ -1093,7 +1115,8 @@ def load_attachments(path="attachments.json"):
 
     # Clear existing attachments
     for item_id in list(G_CANVAS.keys()):
-        delete_attachment(item_id)
+        iterate_item(item_id)
+        delete_attachment()
 
     layout = data.pop("_layout", None)
     window_geom = data.pop("_window", None)
@@ -1320,7 +1343,8 @@ def populate_tree_grouped_by_module():
 def dispatch_event(event, handler_fn):
     CUR["event"] = event
     CUR["top"] = top = canvas_top()
-    CUR["top_item_id"] = item_id_for_canvas_item(top) if top else None
+    CUR["top_item_id"] = item_id = item_id_for_canvas_item(top) if top else None
+    iterate_item(item_id)
     handler_fn()
 
 
